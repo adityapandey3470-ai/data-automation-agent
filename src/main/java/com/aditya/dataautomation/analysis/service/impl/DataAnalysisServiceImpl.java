@@ -105,7 +105,7 @@ public class DataAnalysisServiceImpl implements DataAnalysisService {
             return new ArrayList<>(sheet.getRows());
         }
 
-        // Validate all columns up-front
+
         for (FilterCondition condition : conditions) {
             validateColumn(sheet, condition.getColumn());
         }

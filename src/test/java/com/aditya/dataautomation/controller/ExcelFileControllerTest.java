@@ -47,9 +47,6 @@ class ExcelFileControllerTest {
     @Autowired
     private ObjectMapper objectMapper;
 
-    // ========================================================================
-    // Helper: create .xlsx bytes programmatically
-    // ========================================================================
 
     private byte[] createSimpleExcel(String sheetName, String[] headers, Object[][] data) throws Exception {
         try (Workbook workbook = new XSSFWorkbook();
@@ -214,9 +211,6 @@ class ExcelFileControllerTest {
         }
     }
 
-    // ========================================================================
-    // Tests: Valid uploads
-    // ========================================================================
 
     @Nested
     @DisplayName("Valid .xlsx uploads")
@@ -368,9 +362,6 @@ class ExcelFileControllerTest {
         }
     }
 
-    // ========================================================================
-    // Tests: Invalid uploads
-    // ========================================================================
 
     @Nested
     @DisplayName("Invalid uploads")

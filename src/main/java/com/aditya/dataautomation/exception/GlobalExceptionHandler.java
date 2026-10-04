@@ -129,6 +129,24 @@ public class GlobalExceptionHandler {
     }
 
 
+
+    @ExceptionHandler(com.aditya.dataautomation.cleaning.exception.CleaningException.class)
+    public ResponseEntity<ErrorResponse> handleCleaningException(
+            com.aditya.dataautomation.cleaning.exception.CleaningException ex,
+            HttpServletRequest request) {
+
+        ErrorResponse response = ErrorResponse.builder()
+                .status(HttpStatus.BAD_REQUEST.value())
+                .error("Cleaning Error")
+                .message(ex.getMessage())
+                .path(request.getRequestURI())
+                .timestamp(LocalDateTime.now())
+                .build();
+
+        return ResponseEntity.badRequest().body(response);
+    }
+
+
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ErrorResponse> handleGenericException(
             Exception ex,

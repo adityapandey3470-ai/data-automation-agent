@@ -14,9 +14,7 @@ import java.util.*;
 
 import static org.assertj.core.api.Assertions.*;
 
-/**
- * Unit tests for DataAnalysisService — no Spring context needed.
- */
+
 class DataAnalysisServiceTest {
 
     private DataAnalysisService service;
@@ -53,9 +51,7 @@ class DataAnalysisServiceTest {
         return map;
     }
 
-    // ========================================================================
-    // 1-4: Basic column operations
-    // ========================================================================
+
 
     @Nested
     @DisplayName("Basic column operations")
@@ -132,9 +128,6 @@ class DataAnalysisServiceTest {
         }
     }
 
-    // ========================================================================
-    // 5-8: Numeric operations
-    // ========================================================================
 
     @Nested
     @DisplayName("Numeric operations")
@@ -177,9 +170,6 @@ class DataAnalysisServiceTest {
         }
     }
 
-    // ========================================================================
-    // 9-12: Filtering
-    // ========================================================================
 
     @Nested
     @DisplayName("Filtering")
@@ -291,9 +281,7 @@ class DataAnalysisServiceTest {
         }
     }
 
-    // ========================================================================
-    // 13-15: Sorting
-    // ========================================================================
+
 
     @Nested
     @DisplayName("Sorting")
@@ -343,9 +331,7 @@ class DataAnalysisServiceTest {
         }
     }
 
-    // ========================================================================
-    // 16-18: Group By
-    // ========================================================================
+
 
     @Nested
     @DisplayName("Group By")
@@ -393,9 +379,7 @@ class DataAnalysisServiceTest {
         }
     }
 
-    // ========================================================================
-    // 19-20: Duplicate detection
-    // ========================================================================
+
 
     @Nested
     @DisplayName("Duplicate detection")
@@ -429,9 +413,7 @@ class DataAnalysisServiceTest {
         }
     }
 
-    // ========================================================================
-    // 21: Column Statistics
-    // ========================================================================
+
 
     @Nested
     @DisplayName("Column statistics")
@@ -478,9 +460,7 @@ class DataAnalysisServiceTest {
         }
     }
 
-    // ========================================================================
-    // 22-24: Error handling
-    // ========================================================================
+
 
     @Nested
     @DisplayName("Error handling")
