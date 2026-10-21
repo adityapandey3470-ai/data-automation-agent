@@ -19,6 +19,7 @@ public class ColumnStatistics {
     private final long count;
     private final long nullCount;
     private final long distinctCount;
+    private final Long invalidCount;
 
 
     private final Object min;

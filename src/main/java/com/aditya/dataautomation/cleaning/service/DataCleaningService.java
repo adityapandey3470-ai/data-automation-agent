@@ -1,7 +1,7 @@
 package com.aditya.dataautomation.cleaning.service;
 
 import com.aditya.dataautomation.cleaning.model.*;
-import com.aditya.dataautomation.model.excel.ExcelWorkbookData;
+import com.aditya.dataautomation.excel.model.ExcelWorkbookData;
 
 import java.util.List;
 

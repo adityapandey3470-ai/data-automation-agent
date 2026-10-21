@@ -3,7 +3,7 @@ package com.aditya.dataautomation.analysis.service;
 import com.aditya.dataautomation.analysis.exception.AnalysisException;
 import com.aditya.dataautomation.analysis.model.*;
 import com.aditya.dataautomation.analysis.service.impl.DataAnalysisServiceImpl;
-import com.aditya.dataautomation.model.excel.ExcelSheetData;
+import com.aditya.dataautomation.excel.model.ExcelSheetData;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;

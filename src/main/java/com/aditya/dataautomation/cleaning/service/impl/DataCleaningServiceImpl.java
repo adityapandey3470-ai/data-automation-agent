@@ -3,8 +3,9 @@ package com.aditya.dataautomation.cleaning.service.impl;
 import com.aditya.dataautomation.cleaning.exception.CleaningException;
 import com.aditya.dataautomation.cleaning.model.*;
 import com.aditya.dataautomation.cleaning.service.DataCleaningService;
-import com.aditya.dataautomation.model.excel.ExcelSheetData;
-import com.aditya.dataautomation.model.excel.ExcelWorkbookData;
+import com.aditya.dataautomation.common.util.RowFingerprintUtil;
+import com.aditya.dataautomation.excel.model.ExcelSheetData;
+import com.aditya.dataautomation.excel.model.ExcelWorkbookData;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
@@ -597,9 +598,7 @@ public class DataCleaningServiceImpl implements DataCleaningService {
 
 
     private String fingerprint(Map<String, Object> row, List<String> columns) {
-        return columns.stream()
-                .map(col -> String.valueOf(row.get(col)))
-                .collect(Collectors.joining("|"));
+        return RowFingerprintUtil.computeFingerprint(row, columns);
     }
 
     private boolean isNullOrEmpty(Object val) {

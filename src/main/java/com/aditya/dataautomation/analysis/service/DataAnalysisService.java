@@ -1,7 +1,7 @@
 package com.aditya.dataautomation.analysis.service;
 
 import com.aditya.dataautomation.analysis.model.*;
-import com.aditya.dataautomation.model.excel.ExcelSheetData;
+import com.aditya.dataautomation.excel.model.ExcelSheetData;
 
 import java.util.List;
 import java.util.Map;

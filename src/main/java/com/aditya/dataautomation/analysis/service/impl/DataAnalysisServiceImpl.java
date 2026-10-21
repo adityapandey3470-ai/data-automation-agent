@@ -3,7 +3,8 @@ package com.aditya.dataautomation.analysis.service.impl;
 import com.aditya.dataautomation.analysis.exception.AnalysisException;
 import com.aditya.dataautomation.analysis.model.*;
 import com.aditya.dataautomation.analysis.service.DataAnalysisService;
-import com.aditya.dataautomation.model.excel.ExcelSheetData;
+import com.aditya.dataautomation.common.util.RowFingerprintUtil;
+import com.aditya.dataautomation.excel.model.ExcelSheetData;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
@@ -242,23 +243,12 @@ public class DataAnalysisServiceImpl implements DataAnalysisService {
                 })
                 .toList();
 
-        // Build a fingerprint for each row based on selected columns
         Map<String, List<Map<String, Object>>> fingerprints = new LinkedHashMap<>();
-        StringBuilder sb = new StringBuilder(128);
         for (Map<String, Object> row : sheet.getRows()) {
-            sb.setLength(0);
-            for (int i = 0; i < resolved.size(); i++) {
-                if (i > 0) sb.append('|');
-                Object val = row.get(resolved.get(i));
-                if (val != null) {
-                    sb.append(val);
-                }
-            }
-            String key = sb.toString();
+            String key = RowFingerprintUtil.computeFingerprint(row, resolved);
             fingerprints.computeIfAbsent(key, k -> new ArrayList<>()).add(row);
         }
 
-        // Return all rows whose fingerprint appears more than once
         return fingerprints.values().stream()
                 .filter(list -> list.size() > 1)
                 .flatMap(List::stream)
@@ -291,7 +281,19 @@ public class DataAnalysisServiceImpl implements DataAnalysisService {
 
         switch (dataType) {
             case "NUMERIC" -> {
-                List<BigDecimal> nums = toNumericList(nonNullValues);
+                List<BigDecimal> nums = new ArrayList<>();
+                long invalidCount = 0;
+                for (Object v : nonNullValues) {
+                    BigDecimal bd = tryParseBigDecimal(v);
+                    if (bd != null) {
+                        nums.add(bd);
+                    } else {
+                        invalidCount++;
+                    }
+                }
+                if (invalidCount > 0) {
+                    builder.invalidCount(invalidCount);
+                }
                 if (!nums.isEmpty()) {
                     BigDecimal total = nums.stream().reduce(BigDecimal.ZERO, BigDecimal::add);
                     builder.sum(total)
@@ -311,7 +313,6 @@ public class DataAnalysisServiceImpl implements DataAnalysisService {
                 }
             }
             case "STRING" -> {
-                // Top N most frequent values
                 Map<String, Long> freq = nonNullValues.stream()
                         .map(Object::toString)
                         .collect(Collectors.groupingBy(s -> s, LinkedHashMap::new, Collectors.counting()));
@@ -362,36 +363,75 @@ public class DataAnalysisServiceImpl implements DataAnalysisService {
             return List.of();
         }
 
-
-        boolean hasNumeric = false;
-        boolean hasNonNumeric = false;
+        List<BigDecimal> numericList = new ArrayList<>();
+        int invalidCount = 0;
         for (Object val : nonNullValues) {
-            if (val instanceof Number) {
-                hasNumeric = true;
+            BigDecimal bd = tryParseBigDecimal(val);
+            if (bd != null) {
+                numericList.add(bd);
             } else {
-                hasNonNumeric = true;
+                invalidCount++;
             }
         }
 
-        if (!hasNumeric || hasNonNumeric) {
+        if (numericList.isEmpty()) {
             throw new AnalysisException("Column '" + resolved
                     + "' is not a numeric column. Cannot perform numeric operations on it.");
         }
 
-        return toNumericList(nonNullValues);
+        if (invalidCount > 0) {
+            log.info("Column '{}' has mixed data: {} numeric values analyzed, {} invalid/non-numeric values ignored.",
+                    resolved, numericList.size(), invalidCount);
+        }
+
+        return numericList;
     }
 
     private List<BigDecimal> toNumericList(List<Object> values) {
-        return values.stream()
-                .filter(v -> v instanceof Number)
-                .map(v -> {
-                    if (v instanceof BigDecimal bd) return bd;
-                    if (v instanceof Long l) return BigDecimal.valueOf(l);
-                    if (v instanceof Integer i) return BigDecimal.valueOf(i);
-                    if (v instanceof Double d) return BigDecimal.valueOf(d);
-                    return new BigDecimal(v.toString());
-                })
-                .toList();
+        List<BigDecimal> list = new ArrayList<>();
+        for (Object v : values) {
+            BigDecimal bd = tryParseBigDecimal(v);
+            if (bd != null) {
+                list.add(bd);
+            }
+        }
+        return list;
+    }
+
+    private BigDecimal tryParseBigDecimal(Object val) {
+        if (val == null) return null;
+        if (val instanceof BigDecimal bd) return bd;
+        if (val instanceof Long l) return BigDecimal.valueOf(l);
+        if (val instanceof Integer i) return BigDecimal.valueOf(i);
+        if (val instanceof Double d) {
+            if (Double.isNaN(d) || Double.isInfinite(d)) return null;
+            return BigDecimal.valueOf(d);
+        }
+        if (val instanceof Float f) {
+            if (Float.isNaN(f) || Float.isInfinite(f)) return null;
+            return BigDecimal.valueOf(f.doubleValue());
+        }
+        if (val instanceof Number n) {
+            try {
+                return new BigDecimal(n.toString());
+            } catch (Exception e) {
+                return null;
+            }
+        }
+        if (val instanceof String s) {
+            String trimmed = s.trim();
+            if (trimmed.isEmpty()) return null;
+            String cleaned = trimmed.replace(",", "");
+            if (cleaned.startsWith("$") || cleaned.startsWith("€") || cleaned.startsWith("£") || cleaned.startsWith("₹")) {
+                cleaned = cleaned.substring(1).trim();
+            }
+            try {
+                return new BigDecimal(cleaned);
+            } catch (NumberFormatException e) {
+                return null;
+            }
+        }
+        return null;
     }
 
 
@@ -539,23 +579,24 @@ public class DataAnalysisServiceImpl implements DataAnalysisService {
     private String detectColumnType(List<Object> nonNullValues) {
         if (nonNullValues.isEmpty()) return "UNKNOWN";
 
-        boolean allNumeric = true;
-        boolean allBoolean = true;
-        boolean allDate = true;
+        int numericCount = 0;
+        int booleanCount = 0;
+        int dateCount = 0;
+        int total = nonNullValues.size();
 
         for (Object val : nonNullValues) {
-            if (!(val instanceof Number)) allNumeric = false;
-            if (!(val instanceof Boolean)) allBoolean = false;
-            if (val instanceof String s) {
-                if (!isDateString(s)) allDate = false;
-            } else if (!(val instanceof LocalDate || val instanceof LocalDateTime)) {
-                allDate = false;
+            if (tryParseBigDecimal(val) != null) numericCount++;
+            if (val instanceof Boolean || (val instanceof String s && ("true".equalsIgnoreCase(s.trim()) || "false".equalsIgnoreCase(s.trim())))) {
+                booleanCount++;
+            }
+            if (val instanceof LocalDate || val instanceof LocalDateTime || (val instanceof String s && isDateString(s))) {
+                dateCount++;
             }
         }
 
-        if (allNumeric) return "NUMERIC";
-        if (allBoolean) return "BOOLEAN";
-        if (allDate) return "DATE";
+        if ((double) numericCount / total >= 0.50) return "NUMERIC";
+        if ((double) booleanCount / total >= 0.80) return "BOOLEAN";
+        if ((double) dateCount / total >= 0.70) return "DATE";
         return "STRING";
     }
 }
