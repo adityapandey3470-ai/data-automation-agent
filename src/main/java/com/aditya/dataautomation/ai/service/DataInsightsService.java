@@ -6,7 +6,8 @@ import com.aditya.dataautomation.ai.model.DataQualityReport;
 import com.aditya.dataautomation.ai.model.QualityIssue;
 import com.aditya.dataautomation.analysis.model.ColumnStatistics;
 import com.aditya.dataautomation.analysis.service.DataAnalysisService;
-import com.aditya.dataautomation.model.excel.ExcelSheetData;
+import com.aditya.dataautomation.common.util.RowFingerprintUtil;
+import com.aditya.dataautomation.excel.model.ExcelSheetData;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -66,17 +67,17 @@ public class DataInsightsService {
             }
         }
 
-        // 2. Duplicate detection (High-performance set hashing for large tables)
+        // 2. Duplicate detection (Unified collision-resistant row hashing across all dataset sizes)
         int duplicateCount = 0;
         try {
-            if (totalRows <= 2000) {
-                List<Map<String, Object>> dupRows = analysisService.findDuplicateRows(sheet);
-                duplicateCount = dupRows != null ? dupRows.size() : 0;
-            } else if (sheet.getRows() != null) {
-                Set<Integer> seen = new HashSet<>(Math.min(totalRows, 65536));
+            if (sheet.getRows() != null && headers != null && !headers.isEmpty()) {
+                Set<String> seen = new HashSet<>(Math.min(totalRows, 65536));
                 for (Map<String, Object> r : sheet.getRows()) {
-                    if (r != null && !seen.add(r.hashCode())) {
-                        duplicateCount++;
+                    if (r != null) {
+                        String fp = RowFingerprintUtil.computeFingerprint(r, headers);
+                        if (!seen.add(fp)) {
+                            duplicateCount++;
+                        }
                     }
                 }
             }
@@ -247,6 +248,17 @@ public class DataInsightsService {
             if (rows == null || rows.isEmpty()) return;
 
             double mean = stats.getAverage() != null ? ((Number) stats.getAverage()).doubleValue() : 0.0;
+            if (Double.isNaN(mean) || Double.isInfinite(mean)) return;
+
+            // Guard: If min == max, all values are identical (zero variance, no outliers)
+            if (stats.getMin() != null && stats.getMax() != null) {
+                double minVal = ((Number) stats.getMin()).doubleValue();
+                double maxVal = ((Number) stats.getMax()).doubleValue();
+                if (Math.abs(maxVal - minVal) < 1e-9) {
+                    return;
+                }
+            }
+
             int rowCount = rows.size();
             int sampleLimit = Math.min(rowCount, 3000);
             int stride = Math.max(1, rowCount / sampleLimit);
@@ -264,7 +276,7 @@ public class DataInsightsService {
 
             if (count < 4) return;
             double stdDev = Math.sqrt(varianceSum / count);
-            if (stdDev <= 0) return;
+            if (Double.isNaN(stdDev) || Double.isInfinite(stdDev) || stdDev < 1e-9) return;
 
             double threshold = 2.8 * stdDev;
             long outlierCount = 0;

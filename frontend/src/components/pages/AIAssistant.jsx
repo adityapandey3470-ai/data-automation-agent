@@ -9,6 +9,28 @@ import {
   RefreshCw, Lightbulb, Zap, X, Shield, CheckCircle
 } from '../icons/Icons';
 
+// Safe sessionStorage writer with automatic LRU eviction for QuotaExceededError
+const safeSessionStorageSet = (key, value) => {
+  try {
+    sessionStorage.setItem(key, value);
+  } catch (e) {
+    if (e.name === 'QuotaExceededError' || e.code === 22) {
+      try {
+        const keysToRemove = [];
+        for (let i = 0; i < sessionStorage.length; i++) {
+          const k = sessionStorage.key(i);
+          if (k && k.startsWith('tabufinery_profile_') && k !== key) {
+            keysToRemove.push(k);
+          }
+        }
+        keysToRemove.forEach(k => sessionStorage.removeItem(k));
+        sessionStorage.setItem(key, value);
+      } catch {
+      }
+    }
+  }
+};
+
 export default function AIAssistant({ sheetName, loaded, onRefresh, onNavigate, currentUser, onRequestAuth }) {
   const [tab, setTab] = useState(() => {
     try {
@@ -24,7 +46,6 @@ export default function AIAssistant({ sheetName, loaded, onRefresh, onNavigate, 
     } catch {}
   }, [tab]);
 
-  // AI & Profile State with instant memory/session cache
   const [aiStatus, setAiStatus] = useState({ available: false, model: 'Deterministic Engine' });
   const [profile, setProfile] = useState(() => {
     try {
@@ -41,15 +62,12 @@ export default function AIAssistant({ sheetName, loaded, onRefresh, onNavigate, 
   });
   const [profileError, setProfileError] = useState(null);
 
-  // Chat / Analyst State
   const [input, setInput] = useState('');
   const [analystResponses, setAnalystResponses] = useState([]);
   const [running, setRunning] = useState(false);
 
-  // Confirmation Modal State (SaaS safeguard against silent workbook changes)
   const [pendingAction, setPendingAction] = useState(null);
 
-  // 1. Load AI Status & Data Profile
   const loadProfile = useCallback(async (forceRefresh = false) => {
     if (!loaded || !sheetName) return;
     if (forceRefresh) {
@@ -73,9 +91,7 @@ export default function AIAssistant({ sheetName, loaded, onRefresh, onNavigate, 
       ]);
       setAiStatus(statusRes.data || { available: false, model: 'Deterministic Engine' });
       setProfile(profileRes.data);
-      try {
-        sessionStorage.setItem(`tabufinery_profile_${sheetName}`, JSON.stringify(profileRes.data));
-      } catch {}
+      safeSessionStorageSet(`tabufinery_profile_${sheetName}`, JSON.stringify(profileRes.data));
     } catch (err) {
       setProfileError(getErrorMessage(err, 'Failed to generate profile'));
     } finally {
@@ -87,7 +103,6 @@ export default function AIAssistant({ sheetName, loaded, onRefresh, onNavigate, 
     loadProfile();
   }, [loadProfile]);
 
-  // 2. Ask AI Analyst
   const handleAsk = async (questionText) => {
     if (!currentUser) {
       if (onRequestAuth) onRequestAuth();
@@ -123,7 +138,6 @@ export default function AIAssistant({ sheetName, loaded, onRefresh, onNavigate, 
     }
   };
 
-  // 3. Action Execution with Confirmation Safeguard
   const requestAction = (cmd, requiresConfirmation = true, explanation = '') => {
     if (!currentUser) {
       if (onRequestAuth) onRequestAuth();
@@ -230,7 +244,6 @@ export default function AIAssistant({ sheetName, loaded, onRefresh, onNavigate, 
 
   return (
     <div className="assistant-page">
-      {/* Page Header */}
       <div className="page-header flex-between mb-20">
         <div>
           <h1>AI Analyst & Automatic Insights</h1>
@@ -242,7 +255,6 @@ export default function AIAssistant({ sheetName, loaded, onRefresh, onNavigate, 
           </p>
         </div>
 
-        {/* Action Pills */}
         <div className="flex-gap">
           <button
             className="btn btn-sm btn-outline flex-gap"
@@ -255,7 +267,6 @@ export default function AIAssistant({ sheetName, loaded, onRefresh, onNavigate, 
         </div>
       </div>
 
-      {/* Pill Tabs: AI Analyst vs Automatic Insights */}
       <div className="pill-tabs mb-20">
         <button
           className={`pill-tab ${tab === 'analyst' ? 'active' : ''}`}
@@ -273,12 +284,8 @@ export default function AIAssistant({ sheetName, loaded, onRefresh, onNavigate, 
         </button>
       </div>
 
-      {/* ========================================================
-          TAB 1: AI ANALYST CONSOLE
-          ======================================================== */}
       {tab === 'analyst' && (
         <>
-          {/* Engine Status Banner */}
           <div className="card mb-20 p-12 flex-between" style={{ background: 'var(--surface)', borderLeft: aiStatus.available ? '3px solid var(--emerald)' : '3px solid #6366f1', flexWrap: 'wrap', gap: 10 }}>
             <div className="flex-gap" style={{ alignItems: 'center', flexWrap: 'wrap' }}>
               <div className="status-indicator">
@@ -298,7 +305,6 @@ export default function AIAssistant({ sheetName, loaded, onRefresh, onNavigate, 
             </span>
           </div>
 
-          {/* Question Input Card */}
           <div className="card mb-20 p-16">
             <div className="ai-analyst-input-box">
               <Sparkles size={18} className="text-emerald" style={{ flexShrink: 0 }} />
@@ -323,7 +329,6 @@ export default function AIAssistant({ sheetName, loaded, onRefresh, onNavigate, 
               </button>
             </div>
 
-            {/* Suggested Starter Questions */}
             {profile?.suggestedQuestions?.length > 0 && (
               <div className="suggested-prompts-container mt-12">
                 <span className="text-xs text-secondary" style={{ fontWeight: 600 }}>Suggested:</span>
@@ -343,12 +348,10 @@ export default function AIAssistant({ sheetName, loaded, onRefresh, onNavigate, 
             )}
           </div>
 
-          {/* Responses Stream */}
           {analystResponses.length > 0 ? (
             <div className="analyst-stream mb-20">
               {[...analystResponses].reverse().map((entry, idx) => (
                 <div key={idx} className="card analyst-response-card mb-16">
-                  {/* User Query Header */}
                   <div className="analyst-query-bar flex-between">
                     <div className="flex-gap">
                       <span className="user-q-badge">Q</span>
@@ -357,7 +360,6 @@ export default function AIAssistant({ sheetName, loaded, onRefresh, onNavigate, 
                     <span className="text-xs text-secondary">{entry.time}</span>
                   </div>
 
-                  {/* Body Content */}
                   {entry.error ? (
                     <div className="alert alert-error mt-12">
                       <AlertCircle size={15} />
@@ -365,10 +367,8 @@ export default function AIAssistant({ sheetName, loaded, onRefresh, onNavigate, 
                     </div>
                   ) : (
                     <div className="analyst-answer-body mt-12">
-                      {/* Main Narrative */}
                       <p className="analyst-answer-text">{entry.response.answer}</p>
 
-                      {/* Verified Evidence Pill Chips */}
                       {entry.response.verifiedEvidence && Object.keys(entry.response.verifiedEvidence).length > 0 && (
                         <div className="verified-evidence-wrap mt-12">
                           <span className="evidence-label">Verified Backend Evidence:</span>
@@ -382,7 +382,6 @@ export default function AIAssistant({ sheetName, loaded, onRefresh, onNavigate, 
                         </div>
                       )}
 
-                      {/* Discovered Insights */}
                       {entry.response.insights?.length > 0 && (
                         <div className="analyst-insights-grid mt-16">
                           {entry.response.insights.map((ins, i) => (
@@ -408,7 +407,6 @@ export default function AIAssistant({ sheetName, loaded, onRefresh, onNavigate, 
                         </div>
                       )}
 
-                      {/* Suggested Next Actions */}
                       {entry.response.suggestedActions?.length > 0 && (
                         <div className="suggested-actions-box mt-16">
                           <div className="text-xs font-semibold text-secondary mb-8">RECOMMENDED VERIFIED ACTIONS:</div>
@@ -427,7 +425,6 @@ export default function AIAssistant({ sheetName, loaded, onRefresh, onNavigate, 
                         </div>
                       )}
 
-                      {/* Follow-up Questions */}
                       {entry.response.suggestedFollowUps?.length > 0 && (
                         <div className="suggested-followups-row mt-16">
                           <span className="text-xs text-secondary">Follow up:</span>
@@ -444,7 +441,6 @@ export default function AIAssistant({ sheetName, loaded, onRefresh, onNavigate, 
                         </div>
                       )}
 
-                      {/* Footer Badge */}
                       <div className="analyst-card-footer mt-12 flex-between">
                         <span className="text-xs text-secondary">
                           Engine: {entry.response.engine || 'Verified Engine'} {entry.response.model ? `· ${entry.response.model}` : ''}
@@ -527,9 +523,6 @@ export default function AIAssistant({ sheetName, loaded, onRefresh, onNavigate, 
         </>
       )}
 
-      {/* ========================================================
-          TAB 2: AUTOMATIC DATA INSIGHTS
-          ======================================================== */}
       {tab === 'insights' && (
         <div className="automatic-insights-view">
           {loadingProfile ? (
@@ -547,7 +540,6 @@ export default function AIAssistant({ sheetName, loaded, onRefresh, onNavigate, 
             </div>
           ) : profile ? (
             <>
-              {/* Top KPI Profile Metrics */}
               <div className="kpi-grid mb-20">
                 <div className="kpi-card">
                   <div className="kpi-value">{profile.totalRows.toLocaleString()}</div>
@@ -571,53 +563,54 @@ export default function AIAssistant({ sheetName, loaded, onRefresh, onNavigate, 
                 </div>
               </div>
 
-              {/* Enterprise AI Data Quality Score Card */}
               {profile.qualityReport && (
-                <div className="card p-20 mb-20 data-quality-score-card" style={{ border: '1px solid var(--border-color)', background: 'var(--card-bg)' }}>
-                  <div className="flex-between mb-16" style={{ alignItems: 'flex-start' }}>
-                    <div className="flex-gap">
+                <div className="card p-24 mb-24 data-quality-score-card" style={{ border: '1px solid var(--border-color)', background: 'var(--card-bg)' }}>
+                  <div className="flex-between mb-20" style={{ alignItems: 'flex-start', flexWrap: 'wrap', gap: 16 }}>
+                    <div className="flex-gap" style={{ alignItems: 'center', gap: 16 }}>
                       <div
                         style={{
-                          width: 56,
-                          height: 56,
-                          borderRadius: 12,
+                          width: 58,
+                          height: 58,
+                          borderRadius: 14,
                           background: profile.qualityReport.overallScore >= 80 ? 'rgba(16,185,129,0.15)' : (profile.qualityReport.overallScore >= 60 ? 'rgba(245,158,11,0.15)' : 'rgba(239,68,68,0.15)'),
                           display: 'flex',
                           flexDirection: 'column',
                           alignItems: 'center',
                           justifyContent: 'center',
                           fontWeight: 700,
+                          flexShrink: 0,
+                          border: `1px solid ${profile.qualityReport.overallScore >= 80 ? 'rgba(16,185,129,0.3)' : (profile.qualityReport.overallScore >= 60 ? 'rgba(245,158,11,0.3)' : 'rgba(239,68,68,0.3)')}`,
                           color: profile.qualityReport.overallScore >= 80 ? 'var(--emerald)' : (profile.qualityReport.overallScore >= 60 ? '#f59e0b' : '#ef4444')
                         }}
                       >
-                        <span style={{ fontSize: 20, lineHeight: 1 }}>{profile.qualityReport.grade}</span>
-                        <span style={{ fontSize: 10, opacity: 0.85 }}>{profile.qualityReport.overallScore}/100</span>
+                        <span style={{ fontSize: 22, lineHeight: 1.1, fontWeight: 800 }}>{profile.qualityReport.grade}</span>
+                        <span style={{ fontSize: 10, opacity: 0.85, fontWeight: 600 }}>{profile.qualityReport.overallScore}/100</span>
                       </div>
                       <div>
-                        <div className="flex-gap" style={{ alignItems: 'center' }}>
-                          <h3 style={{ fontSize: 16, margin: 0, fontWeight: 600 }}>AI Data Quality Score</h3>
+                        <div className="flex-gap" style={{ alignItems: 'center', gap: 10 }}>
+                          <h3 style={{ fontSize: 17, margin: 0, fontWeight: 700, color: 'var(--text-primary)' }}>AI Data Quality Score</h3>
                           <span className={`badge ${profile.qualityReport.status === 'EXCELLENT' ? 'badge-success' : (profile.qualityReport.status === 'GOOD' ? 'badge-info' : 'badge-warning')}`}>
                             {profile.qualityReport.status}
                           </span>
                         </div>
-                        <p className="text-secondary mt-4" style={{ fontSize: 12, margin: 0 }}>
+                        <p className="text-secondary mt-6" style={{ fontSize: 12.5, margin: 0, lineHeight: 1.5 }}>
                           {profile.qualityReport.summaryText}
                         </p>
                       </div>
                     </div>
 
-                    <div className="flex-gap" style={{ alignItems: 'center' }}>
+                    <div className="flex-gap" style={{ alignItems: 'center', gap: 8 }}>
                       {profile.qualityReport.totalIssuesCount === 0 ? (
-                        <span className="badge badge-success" style={{ fontSize: 11, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                          <CheckCircle size={12} /> Zero Quality Issues Detected
+                        <span className="badge badge-success" style={{ fontSize: 11.5, padding: '5px 10px', display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                          <CheckCircle size={13} /> Zero Quality Issues Detected
                         </span>
                       ) : (
                         <>
-                          <span className="badge badge-warning" style={{ fontSize: 11 }}>
+                          <span className="badge badge-warning" style={{ fontSize: 11.5, padding: '5px 10px' }}>
                             {profile.qualityReport.totalIssuesCount} Issues Identified
                           </span>
                           {profile.qualityReport.highSeverityCount > 0 && (
-                            <span className="badge badge-danger" style={{ background: 'rgba(239,68,68,0.15)', color: '#ef4444', fontSize: 11 }}>
+                            <span className="badge badge-danger" style={{ background: 'rgba(239,68,68,0.15)', color: '#ef4444', fontSize: 11.5, padding: '5px 10px' }}>
                               {profile.qualityReport.highSeverityCount} High Severity
                             </span>
                           )}
@@ -626,85 +619,88 @@ export default function AIAssistant({ sheetName, loaded, onRefresh, onNavigate, 
                     </div>
                   </div>
 
-                  {/* 4 Health Dimension Progress Bars */}
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: 12, marginBottom: 16 }}>
-                    <div className="p-10" style={{ background: 'var(--bg-secondary)', borderRadius: 8 }}>
-                      <div className="flex-between mb-4" style={{ fontSize: 11 }}>
-                        <span className="text-secondary">Completeness</span>
-                        <strong>{profile.qualityReport.completenessScore}%</strong>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 14, marginBottom: 20 }}>
+                    <div style={{ padding: '12px 14px', background: 'var(--bg)', borderRadius: 10, border: '1px solid var(--border)' }}>
+                      <div className="flex-between mb-6" style={{ fontSize: 11.5 }}>
+                        <span className="text-secondary font-medium">Completeness</span>
+                        <strong style={{ color: 'var(--text-primary)' }}>{profile.qualityReport.completenessScore}%</strong>
                       </div>
-                      <div style={{ height: 5, background: 'var(--border-color)', borderRadius: 3, overflow: 'hidden' }}>
-                        <div style={{ width: `${profile.qualityReport.completenessScore}%`, height: '100%', background: 'var(--emerald)' }} />
-                      </div>
-                    </div>
-
-                    <div className="p-10" style={{ background: 'var(--bg-secondary)', borderRadius: 8 }}>
-                      <div className="flex-between mb-4" style={{ fontSize: 11 }}>
-                        <span className="text-secondary">Uniqueness</span>
-                        <strong>{profile.qualityReport.uniquenessScore}%</strong>
-                      </div>
-                      <div style={{ height: 5, background: 'var(--border-color)', borderRadius: 3, overflow: 'hidden' }}>
-                        <div style={{ width: `${profile.qualityReport.uniquenessScore}%`, height: '100%', background: '#3b82f6' }} />
+                      <div style={{ height: 7, background: 'rgba(148, 163, 184, 0.15)', borderRadius: 4, overflow: 'hidden' }}>
+                        <div style={{ width: `${profile.qualityReport.completenessScore}%`, height: '100%', background: 'var(--emerald)', borderRadius: 4 }} />
                       </div>
                     </div>
 
-                    <div className="p-10" style={{ background: 'var(--bg-secondary)', borderRadius: 8 }}>
-                      <div className="flex-between mb-4" style={{ fontSize: 11 }}>
-                        <span className="text-secondary">Consistency</span>
-                        <strong>{profile.qualityReport.consistencyScore}%</strong>
+                    <div style={{ padding: '12px 14px', background: 'var(--bg)', borderRadius: 10, border: '1px solid var(--border)' }}>
+                      <div className="flex-between mb-6" style={{ fontSize: 11.5 }}>
+                        <span className="text-secondary font-medium">Uniqueness</span>
+                        <strong style={{ color: 'var(--text-primary)' }}>{profile.qualityReport.uniquenessScore}%</strong>
                       </div>
-                      <div style={{ height: 5, background: 'var(--border-color)', borderRadius: 3, overflow: 'hidden' }}>
-                        <div style={{ width: `${profile.qualityReport.consistencyScore}%`, height: '100%', background: '#8b5cf6' }} />
+                      <div style={{ height: 7, background: 'rgba(148, 163, 184, 0.15)', borderRadius: 4, overflow: 'hidden' }}>
+                        <div style={{ width: `${profile.qualityReport.uniquenessScore}%`, height: '100%', background: '#3b82f6', borderRadius: 4 }} />
                       </div>
                     </div>
 
-                    <div className="p-10" style={{ background: 'var(--bg-secondary)', borderRadius: 8 }}>
-                      <div className="flex-between mb-4" style={{ fontSize: 11 }}>
-                        <span className="text-secondary">Validity</span>
-                        <strong>{profile.qualityReport.validityScore}%</strong>
+                    <div style={{ padding: '12px 14px', background: 'var(--bg)', borderRadius: 10, border: '1px solid var(--border)' }}>
+                      <div className="flex-between mb-6" style={{ fontSize: 11.5 }}>
+                        <span className="text-secondary font-medium">Consistency</span>
+                        <strong style={{ color: 'var(--text-primary)' }}>{profile.qualityReport.consistencyScore}%</strong>
                       </div>
-                      <div style={{ height: 5, background: 'var(--border-color)', borderRadius: 3, overflow: 'hidden' }}>
-                        <div style={{ width: `${profile.qualityReport.validityScore}%`, height: '100%', background: '#f59e0b' }} />
+                      <div style={{ height: 7, background: 'rgba(148, 163, 184, 0.15)', borderRadius: 4, overflow: 'hidden' }}>
+                        <div style={{ width: `${profile.qualityReport.consistencyScore}%`, height: '100%', background: '#8b5cf6', borderRadius: 4 }} />
+                      </div>
+                    </div>
+
+                    <div style={{ padding: '12px 14px', background: 'var(--bg)', borderRadius: 10, border: '1px solid var(--border)' }}>
+                      <div className="flex-between mb-6" style={{ fontSize: 11.5 }}>
+                        <span className="text-secondary font-medium">Validity</span>
+                        <strong style={{ color: 'var(--text-primary)' }}>{profile.qualityReport.validityScore}%</strong>
+                      </div>
+                      <div style={{ height: 7, background: 'rgba(148, 163, 184, 0.15)', borderRadius: 4, overflow: 'hidden' }}>
+                        <div style={{ width: `${profile.qualityReport.validityScore}%`, height: '100%', background: '#f59e0b', borderRadius: 4 }} />
                       </div>
                     </div>
                   </div>
 
-                  {/* Quality Issues List with 1-Click Actionable Fixes */}
                   {profile.qualityReport.issues?.length > 0 && (
-                    <div className="quality-issues-box pt-12" style={{ borderTop: '1px solid var(--border-color)' }}>
-                      <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8, color: 'var(--text-primary)' }}>
-                        Actionable Data Hygiene Recommendations:
+                    <div className="quality-issues-box">
+                      <div className="quality-issues-header">
+                        <div className="flex-gap" style={{ alignItems: 'center', gap: 8 }}>
+                          <Shield size={16} className="text-emerald" />
+                          <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)', letterSpacing: '0.2px' }}>
+                            Actionable Data Hygiene Recommendations:
+                          </span>
+                        </div>
+                        <span className="text-xs text-secondary" style={{ fontWeight: 500 }}>
+                          {profile.qualityReport.issues.length} {profile.qualityReport.issues.length === 1 ? 'Action Recommended' : 'Actions Recommended'}
+                        </span>
                       </div>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                         {profile.qualityReport.issues.map((iss) => (
                           <div
                             key={iss.id}
-                            className="p-10 flex-between"
+                            className="quality-issue-card"
                             style={{
-                              background: 'var(--bg-secondary)',
-                              borderRadius: 6,
-                              fontSize: 12,
-                              borderLeft: `3px solid ${iss.severity === 'HIGH' ? '#ef4444' : (iss.severity === 'MEDIUM' ? '#f59e0b' : '#3b82f6')}`
+                              borderLeft: `4px solid ${iss.severity === 'HIGH' ? '#ef4444' : (iss.severity === 'MEDIUM' ? '#f59e0b' : '#3b82f6')}`
                             }}
                           >
-                            <div style={{ flex: 1, minWidth: 0, marginRight: 12 }}>
-                              <div className="flex-gap" style={{ alignItems: 'center', marginBottom: 2 }}>
-                                <span className={`badge ${iss.severity === 'HIGH' ? 'badge-warning' : 'badge-neutral'}`} style={{ fontSize: 10 }}>
+                            <div className="quality-issue-main">
+                              <div className="quality-issue-meta">
+                                <span className={`badge ${iss.severity === 'HIGH' ? 'badge-warning' : 'badge-neutral'}`} style={{ fontSize: 10.5, fontWeight: 700 }}>
                                   {iss.dimension}
                                 </span>
                                 {iss.column && (
-                                  <span className="badge badge-neutral" style={{ fontSize: 10 }}>Col: {iss.column}</span>
+                                  <span className="badge badge-neutral" style={{ fontSize: 10.5 }}>Col: {iss.column}</span>
                                 )}
-                                <span style={{ fontWeight: 600 }}>{iss.title}</span>
+                                <span className="quality-issue-title">{iss.title}</span>
                               </div>
-                              <div className="text-secondary" style={{ fontSize: 11 }}>
-                                {iss.description} — <em>{iss.recommendation}</em>
-                              </div>
+                              <p className="quality-issue-desc">
+                                {iss.description} — <em style={{ color: 'var(--text-primary)', fontStyle: 'normal', fontWeight: 500 }}>{iss.recommendation}</em>
+                              </p>
                             </div>
 
                             {iss.operation && (
                               <button
-                                className="btn btn-xs btn-outline"
+                                className="quality-autofix-btn"
                                 onClick={() => {
                                   if (iss.operation === 'REMOVE_DUPLICATES') {
                                     requestAction('remove duplicates', true, 'Remove all duplicate rows');
@@ -715,9 +711,9 @@ export default function AIAssistant({ sheetName, loaded, onRefresh, onNavigate, 
                                   }
                                 }}
                                 disabled={running}
-                                style={{ whiteSpace: 'nowrap' }}
                               >
-                                <Zap size={11} className="text-emerald" /> Auto-Fix
+                                <Zap size={13} className="text-emerald" />
+                                <span>Auto-Fix</span>
                               </button>
                             )}
                           </div>
@@ -728,35 +724,36 @@ export default function AIAssistant({ sheetName, loaded, onRefresh, onNavigate, 
                 </div>
               )}
 
-              {/* Insights List */}
-              <div className="insights-feed mb-20">
-                <div className="flex-between mb-12">
-                  <h3 style={{ fontSize: 15, fontWeight: 600 }}>
-                    Automated Findings ({profile.insights?.length || 0})
-                  </h3>
+              <div className="insights-feed mb-24">
+                <div className="flex-between mb-16" style={{ alignItems: 'center' }}>
+                  <div className="flex-gap" style={{ alignItems: 'center', gap: 8 }}>
+                    <Lightbulb size={18} className="text-emerald" />
+                    <h3 style={{ fontSize: 16, fontWeight: 700, margin: 0, color: 'var(--text-primary)' }}>
+                      Automated Findings ({profile.insights?.length || 0})
+                    </h3>
+                  </div>
                   <span className="text-xs text-secondary">
-                    Distinguishing statistical facts from interpretations
+                    Key data facts with recommended actions
                   </span>
                 </div>
 
                 {profile.insights?.map((ins) => (
-                  <div key={ins.id} className={`card insight-block-card mb-16 border-${ins.severity?.toLowerCase() || 'info'}`}>
-                    <div className="insight-card-header flex-between mb-12">
-                      <div className="flex-gap">
-                        <span className={`badge badge-${ins.severity === 'WARNING' ? 'warning' : (ins.severity === 'SUCCESS' ? 'success' : 'info')}`}>
+                  <div key={ins.id} className={`card insight-block-card mb-20 border-${ins.severity?.toLowerCase() || 'info'}`}>
+                    <div className="insight-card-header flex-between mb-14" style={{ alignItems: 'center' }}>
+                      <div className="flex-gap" style={{ alignItems: 'center', gap: 10 }}>
+                        <span className={`badge badge-${ins.severity === 'WARNING' ? 'warning' : (ins.severity === 'SUCCESS' ? 'success' : 'info')}`} style={{ fontSize: 11, fontWeight: 700 }}>
                           {ins.category}
                         </span>
                         {ins.affectedColumn && (
-                          <span className="badge badge-neutral">Column: {ins.affectedColumn}</span>
+                          <span className="badge badge-neutral" style={{ fontSize: 11 }}>Column: {ins.affectedColumn}</span>
                         )}
                         <h4 className="insight-card-title">{ins.title}</h4>
                       </div>
                       {ins.confidence && (
-                        <span className="text-xs text-secondary">{(ins.confidence * 100).toFixed(0)}% confidence</span>
+                        <span className="text-xs text-secondary font-medium">{(ins.confidence * 100).toFixed(0)}% confidence</span>
                       )}
                     </div>
 
-                    {/* Distinct Fact vs Interpretation */}
                     <div className="insight-content-split">
                       <div className="fact-box">
                         <div className="box-tag">STATISTICAL FACT</div>
@@ -768,19 +765,23 @@ export default function AIAssistant({ sheetName, loaded, onRefresh, onNavigate, 
                       </div>
                     </div>
 
-                    {/* Action Footer */}
                     {ins.suggestedAction && (
-                      <div className="insight-action-footer flex-between mt-12 pt-12">
-                        <span className="action-hint text-xs">
-                          <strong>Recommended:</strong> {ins.suggestedAction}
-                        </span>
+                      <div className="insight-action-banner">
+                        <div className="insight-action-info">
+                          <div className="insight-action-tag">
+                            <Sparkles size={13} />
+                            <span>RECOMMENDED ACTION</span>
+                          </div>
+                          <p className="insight-action-text">{ins.suggestedAction}</p>
+                        </div>
                         {ins.suggestedCommand && (
                           <button
-                            className="btn btn-xs btn-outline"
+                            className="insight-execute-btn"
                             onClick={() => requestAction(ins.suggestedCommand, true, ins.suggestedAction)}
                             disabled={running}
                           >
-                            <Play size={11} /> Execute Fix
+                            <Play size={12} style={{ fill: 'currentColor' }} />
+                            <span>Execute Fix</span>
                           </button>
                         )}
                       </div>
@@ -793,9 +794,6 @@ export default function AIAssistant({ sheetName, loaded, onRefresh, onNavigate, 
         </div>
       )}
 
-      {/* ========================================================
-          CONFIRMATION MODAL (SaaS Safeguard: Never silently modify)
-          ======================================================== */}
       {pendingAction && (
         <div className="auth-overlay">
           <div className="auth-card" style={{ maxWidth: 480, position: 'relative' }}>
@@ -836,7 +834,6 @@ export default function AIAssistant({ sheetName, loaded, onRefresh, onNavigate, 
                 Tabufinery will automatically execute the following deterministic transformation pipeline on your dataset:
               </p>
 
-              {/* Command Code Box */}
               <div style={{
                 background: 'var(--surface-secondary, rgba(0, 0, 0, 0.3))',
                 borderRadius: 8,

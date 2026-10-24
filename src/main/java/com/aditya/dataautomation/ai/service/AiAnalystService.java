@@ -2,9 +2,9 @@ package com.aditya.dataautomation.ai.service;
 
 import com.aditya.dataautomation.ai.model.*;
 import com.aditya.dataautomation.analysis.model.ColumnStatistics;
-import com.aditya.dataautomation.model.excel.ExcelSheetData;
-import com.aditya.dataautomation.model.excel.ExcelWorkbookData;
-import com.aditya.dataautomation.service.WorkbookSessionHolder;
+import com.aditya.dataautomation.excel.model.ExcelSheetData;
+import com.aditya.dataautomation.excel.model.ExcelWorkbookData;
+import com.aditya.dataautomation.workbook.service.WorkbookSessionHolder;
 import com.fasterxml.jackson.databind.JsonNode;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -164,7 +164,6 @@ public class AiAnalystService {
                 answer.append(String.format("Detected %d statistical outlier patterns in numeric fields.", relevantInsights.size()));
             }
         } else {
-            // General overview
             answer.append(String.format("Dataset '%s' contains %d rows and %d columns (%s). Overall completeness is %.1f%% with %d duplicate records.",
                     profile.getSheetName(), profile.getTotalRows(), profile.getTotalColumns(),
                     String.join(", ", profile.getHeaders()), profile.getCompletenessPercentage(), profile.getDuplicateRowsCount()));
