@@ -1,7 +1,7 @@
 package com.aditya.dataautomation.export.service;
 
-import com.aditya.dataautomation.model.excel.ExcelSheetData;
-import com.aditya.dataautomation.model.excel.ExcelWorkbookData;
+import com.aditya.dataautomation.excel.model.ExcelSheetData;
+import com.aditya.dataautomation.excel.model.ExcelWorkbookData;
 
 /**
  * Exports processed workbook data to Excel (.xlsx) or CSV format.

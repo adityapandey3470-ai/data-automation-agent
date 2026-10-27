@@ -6,8 +6,8 @@ import com.aditya.dataautomation.ai.model.DataQualityReport;
 import com.aditya.dataautomation.ai.model.QualityIssue;
 import com.aditya.dataautomation.ai.service.DataInsightsService;
 import com.aditya.dataautomation.analysis.model.ColumnStatistics;
-import com.aditya.dataautomation.model.excel.ExcelSheetData;
-import com.aditya.dataautomation.model.excel.ExcelWorkbookData;
+import com.aditya.dataautomation.excel.model.ExcelSheetData;
+import com.aditya.dataautomation.excel.model.ExcelWorkbookData;
 import com.lowagie.text.*;
 import com.lowagie.text.pdf.PdfPCell;
 import com.lowagie.text.pdf.PdfPTable;
@@ -57,33 +57,25 @@ public class PdfReportExportService {
             PdfWriter.getInstance(document, out);
             document.open();
 
-            // 1. Header Banner
             addHeaderBanner(document, workbook.getFileName(), sheet.getSheetName());
-
-            // 2. Executive KPI Summary Cards
             addKpiSummary(document, profile);
 
-            // 3. AI Data Quality Score & Dimensions
             if (quality != null) {
                 addDataQualitySection(document, quality);
             }
 
-            // 4. Quality Issues & Actionable Recommendations
             if (quality != null && quality.getIssues() != null && !quality.getIssues().isEmpty()) {
                 addQualityIssuesTable(document, quality);
             }
 
-            // 5. Automated Data Insights
             if (profile.getInsights() != null && !profile.getInsights().isEmpty()) {
                 addInsightsSection(document, profile);
             }
 
-            // 6. Column Profile Summary
             if (profile.getColumnStatistics() != null && !profile.getColumnStatistics().isEmpty()) {
                 addColumnStatisticsTable(document, profile.getColumnStatistics());
             }
 
-            // 7. Footer
             addReportFooter(document);
 
             document.close();

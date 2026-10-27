@@ -2,18 +2,18 @@ package com.aditya.dataautomation.project.service;
 
 import com.aditya.dataautomation.auth.entity.User;
 import com.aditya.dataautomation.auth.repository.UserRepository;
-import com.aditya.dataautomation.dto.excel.ExcelFileResponse;
-import com.aditya.dataautomation.dto.excel.ExcelSheetResponse;
+import com.aditya.dataautomation.excel.dto.ExcelFileResponse;
+import com.aditya.dataautomation.excel.dto.ExcelSheetResponse;
 import com.aditya.dataautomation.exception.InvalidRequestException;
-import com.aditya.dataautomation.model.excel.ExcelSheetData;
-import com.aditya.dataautomation.model.excel.ExcelWorkbookData;
+import com.aditya.dataautomation.excel.model.ExcelSheetData;
+import com.aditya.dataautomation.excel.model.ExcelWorkbookData;
 import com.aditya.dataautomation.project.dto.ProjectDetailDto;
 import com.aditya.dataautomation.project.dto.ProjectSummaryDto;
 import com.aditya.dataautomation.project.dto.RenameProjectRequest;
 import com.aditya.dataautomation.project.dto.SaveProjectRequest;
 import com.aditya.dataautomation.project.entity.Project;
 import com.aditya.dataautomation.project.repository.ProjectRepository;
-import com.aditya.dataautomation.service.WorkbookSessionHolder;
+import com.aditya.dataautomation.workbook.service.WorkbookSessionHolder;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
@@ -36,7 +36,10 @@ public class ProjectService {
 
     @Transactional
     public ProjectSummaryDto saveCurrentProject(Long userId, SaveProjectRequest request) {
-        ExcelWorkbookData workbook = workbookSessionHolder.get();
+        ExcelWorkbookData workbook = workbookSessionHolder.getForUser(userId);
+        if (workbook == null) {
+            workbook = workbookSessionHolder.get();
+        }
         if (workbook == null) {
             throw new InvalidRequestException("No active workbook session to save. Please upload a file first.");
         }
@@ -89,7 +92,7 @@ public class ProjectService {
 
         try {
             project.setWorkbookDataJson(objectMapper.writeValueAsString(workbook));
-            project.setCleaningHistoryJson(objectMapper.writeValueAsString(workbookSessionHolder.getHistoryDescriptions()));
+            project.setCleaningHistoryJson(objectMapper.writeValueAsString(workbookSessionHolder.getHistoryDescriptionsForUser(userId)));
         } catch (JsonProcessingException e) {
             log.error("Failed to serialize workbook data for project saving", e);
             throw new RuntimeException("Failed to save project data", e);
@@ -123,8 +126,8 @@ public class ProjectService {
 
         try {
             ExcelWorkbookData workbook = objectMapper.readValue(project.getWorkbookDataJson(), ExcelWorkbookData.class);
-            workbookSessionHolder.clear();
-            workbookSessionHolder.store(workbook, "Open Project: " + project.getName());
+            workbookSessionHolder.clearForUser(userId);
+            workbookSessionHolder.storeForUser(userId, workbook, "Open Project: " + project.getName());
 
             List<String> history = Collections.emptyList();
             if (project.getCleaningHistoryJson() != null && !project.getCleaningHistoryJson().isBlank()) {

@@ -21,12 +21,10 @@ export default function SavedProjectsModal({
   const [error, setError] = useState(null);
   const [saveSuccess, setSaveSuccess] = useState(null);
 
-  // Save Form State
   const [saveName, setSaveName] = useState('');
   const [saveDesc, setSaveDesc] = useState('');
   const [saving, setSaving] = useState(false);
 
-  // Rename State
   const [editingId, setEditingId] = useState(null);
   const [renameValue, setRenameValue] = useState('');
 
@@ -47,7 +45,6 @@ export default function SavedProjectsModal({
   useEffect(() => {
     if (isOpen) {
       if (!currentUser) {
-        // Must authenticate to manage projects
         return;
       }
       fetchProjects();
@@ -179,14 +176,13 @@ export default function SavedProjectsModal({
                 </div>
               )}
 
-              {/* Save Current Workbook Section */}
               {loaded && (
                 <div style={{ background: 'var(--surface-secondary, rgba(255,255,255,0.03))', border: '1px solid var(--border)', borderRadius: 10, padding: '14px 16px', marginBottom: 20 }}>
                   <h4 style={{ fontSize: 13, fontWeight: 600, marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6, color: 'var(--text-primary)' }}>
                     <Plus size={14} className="text-emerald" /> Save Active Session as Project
                   </h4>
                   <form onSubmit={handleSaveCurrent}>
-                    <div style={{ display: 'grid', gridTemplateColumns: '2fr 1.5fr auto', gap: 8 }}>
+                    <div className="projects-save-form">
                       <input
                         type="text"
                         className="input-field"
@@ -219,7 +215,6 @@ export default function SavedProjectsModal({
                 </div>
               )}
 
-              {/* Saved Projects List */}
               <div className="projects-list-header flex-between mb-12">
                 <span style={{ fontSize: 13, fontWeight: 600 }}>
                   Your Saved Projects ({projects.length})

@@ -1,6 +1,6 @@
 package com.aditya.dataautomation.project.dto;
 
-import com.aditya.dataautomation.dto.excel.ExcelFileResponse;
+import com.aditya.dataautomation.excel.dto.ExcelFileResponse;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;

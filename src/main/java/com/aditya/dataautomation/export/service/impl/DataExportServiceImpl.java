@@ -2,8 +2,8 @@ package com.aditya.dataautomation.export.service.impl;
 
 import com.aditya.dataautomation.export.exception.ExportException;
 import com.aditya.dataautomation.export.service.DataExportService;
-import com.aditya.dataautomation.model.excel.ExcelSheetData;
-import com.aditya.dataautomation.model.excel.ExcelWorkbookData;
+import com.aditya.dataautomation.excel.model.ExcelSheetData;
+import com.aditya.dataautomation.excel.model.ExcelWorkbookData;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.poi.ss.usermodel.*;
 import org.apache.poi.xssf.streaming.SXSSFWorkbook;
@@ -83,14 +83,12 @@ public class DataExportServiceImpl implements DataExportService {
         int estimatedSize = (rows != null ? rows.size() + 1 : 1) * Math.max(1, headers.size()) * 20;
         StringBuilder sb = new StringBuilder(Math.max(1024, estimatedSize));
 
-        // Header row
         for (int i = 0; i < headers.size(); i++) {
             if (i > 0) sb.append(',');
             sb.append(escapeCsv(headers.get(i)));
         }
         sb.append('\n');
 
-        // Data rows
         if (rows != null) {
             for (Map<String, Object> row : rows) {
                 for (int i = 0; i < headers.size(); i++) {
@@ -105,17 +103,12 @@ public class DataExportServiceImpl implements DataExportService {
         return sb.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8);
     }
 
-    // ========================================================================
-    // Helpers
-    // ========================================================================
-
     private void writeSheet(Workbook wb, ExcelSheetData sheetData,
                             CellStyle headerStyle, CellStyle dateStyle) {
         Sheet sheet = wb.createSheet(sheetData.getSheetName());
         List<String> headers = sheetData.getHeaders();
         List<Map<String, Object>> rows = sheetData.getRows();
 
-        // Header row
         Row headerRow = sheet.createRow(0);
         for (int i = 0; i < headers.size(); i++) {
             Cell cell = headerRow.createCell(i);
@@ -123,7 +116,6 @@ public class DataExportServiceImpl implements DataExportService {
             cell.setCellStyle(headerStyle);
         }
 
-        // Data rows
         if (rows != null) {
             for (int r = 0; r < rows.size(); r++) {
                 Row row = sheet.createRow(r + 1);

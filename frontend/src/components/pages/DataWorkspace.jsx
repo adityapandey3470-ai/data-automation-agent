@@ -49,7 +49,6 @@ export default function DataWorkspace({
   // Per-sheet in-memory cache to prevent redundant re-fetching & freeze on toggle
   const sheetDataCacheRef = useRef({});
 
-  // Quick Table Search & Column Sorting
   const [searchQuery, setSearchQuery] = useState('');
   const [sortColumn, setSortColumn] = useState(null);
   const [sortDirection, setSortDirection] = useState('asc'); // 'asc' | 'desc'
@@ -113,7 +112,6 @@ export default function DataWorkspace({
     ? totalVirtualHeight - virtualRows[virtualRows.length - 1].end
     : 0;
 
-  // Reset scroll and filters on sheet change
   useEffect(() => {
     setSearchQuery('');
     setSortColumn(null);
@@ -125,23 +123,19 @@ export default function DataWorkspace({
     }
   }, [viewMode, activeSheet?.sheetName]);
 
-  // Invalidate cache when workbook is refreshed / modified by cleaning
   useEffect(() => {
     sheetDataCacheRef.current = {};
   }, [refreshKey, fileInfo?.fileId]);
 
-  // History & Notification state
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyToast, setHistoryToast] = useState(null);
 
-  // Change Preview Modal state
   const [previewModalOpen, setPreviewModalOpen] = useState(false);
   const [previewData, setPreviewData] = useState(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewApplying, setPreviewApplying] = useState(false);
   const [pendingApplyAction, setPendingApplyAction] = useState(null);
 
-  // Cleaning form state
   const [cleaningPanel, setCleaningPanel] = useState(false);
   const [cleanOp, setCleanOp] = useState('duplicates');
   const [cleanCol, setCleanCol] = useState('');
@@ -154,7 +148,6 @@ export default function DataWorkspace({
   const [newVal, setNewVal] = useState('');
   const [targetType, setTargetType] = useState('STRING');
 
-  // Pipeline builder
   const [pipeline, setPipeline] = useState([]);
 
   const loaded = !!fileInfo;
@@ -192,9 +185,7 @@ export default function DataWorkspace({
         setLoadingPreview(false);
       }
     } else {
-      // Preview mode (top 100)
       if (cached?.fullData) {
-        // Full data is already in memory, displayRows slices top 100 instantly
         setPreview(cached.fullData);
         setLoadingPreview(false);
         return;
@@ -284,7 +275,6 @@ export default function DataWorkspace({
     }
   }, [currentUser, onRequestAuth, onUploadSuccess]);
 
-  // Undo Action
   const handleUndo = async () => {
     if (!fileInfo?.canUndo || historyLoading) return;
     setHistoryLoading(true);
@@ -299,7 +289,6 @@ export default function DataWorkspace({
     }
   };
 
-  // Redo Action
   const handleRedo = async () => {
     if (!fileInfo?.canRedo || historyLoading) return;
     setHistoryLoading(true);
@@ -340,7 +329,6 @@ export default function DataWorkspace({
     }
   };
 
-  // 1. Request Preview for Single Clean Transformation
   const handleRequestPreview = async () => {
     const req = buildCurrentRequest();
     if (!req) return;
@@ -373,7 +361,6 @@ export default function DataWorkspace({
     }
   };
 
-  // 2. Request Preview for Batch Pipeline
   const handlePipelinePreview = async () => {
     if (pipeline.length === 0) return;
     setCleanError(null);
@@ -402,7 +389,6 @@ export default function DataWorkspace({
     }
   };
 
-  // 3. User Confirms "Apply Changes" from Preview Modal
   const handleConfirmApply = async () => {
     if (!pendingApplyAction) return;
     setPreviewApplying(true);
@@ -430,14 +416,12 @@ export default function DataWorkspace({
 
   return (
     <div className="workspace-page">
-      {/* Page Header with Undo / Redo Toolbar */}
       <div className="page-header flex-between mb-20">
         <div>
           <h1>Data Workspace</h1>
           <p>Direct workbook ingestion, live tabular inspection, change preview, and undo/redo history.</p>
         </div>
 
-        {/* Undo / Redo Toolbar */}
         {loaded && (
           <div className="flex-gap undo-redo-toolbar">
             <button
@@ -482,7 +466,6 @@ export default function DataWorkspace({
         )}
       </div>
 
-      {/* History Toast / Action Status Banner */}
       {historyToast && (
         <div className={`alert alert-${historyToast.type === 'error' ? 'error' : 'info'} mb-16 flex-between`}>
           <div className="flex-gap">
@@ -495,7 +478,6 @@ export default function DataWorkspace({
         </div>
       )}
 
-      {/* Multi-File Workspace Registry */}
       {currentUser && workspaceFiles && workspaceFiles.length > 0 && (
         <div className="card mb-20">
           <div className="card-header flex-between">
@@ -560,7 +542,6 @@ export default function DataWorkspace({
         </div>
       )}
 
-      {/* Refined Upload Dropzone */}
       <div className="card mb-20">
         <div className="card-header flex-between">
           <div className="flex-gap">
@@ -620,7 +601,6 @@ export default function DataWorkspace({
         </div>
       </div>
 
-      {/* Sheet Navigator Pills */}
       {loaded && fileInfo.sheets?.length > 1 && (
         <div className="card mb-20">
           <div className="flex-between">
@@ -643,7 +623,6 @@ export default function DataWorkspace({
         </div>
       )}
 
-      {/* Spreadsheet Preview Card */}
       {loaded && (
         <div className="card mb-20">
           <div className="card-header flex-between" style={{ flexWrap: 'wrap', gap: 12 }}>
@@ -667,7 +646,6 @@ export default function DataWorkspace({
             </div>
 
             <div className="flex-gap" style={{ flexWrap: 'wrap' }}>
-              {/* Table Quick Search Filter */}
               <div
                 style={{
                   display: 'flex',
@@ -717,7 +695,6 @@ export default function DataWorkspace({
                 )}
               </div>
 
-              {/* View Mode Toggle */}
               <div className="pill-tabs">
                 <button
                   className={`pill-tab ${viewMode === 'preview' ? 'active' : ''}`}
@@ -882,7 +859,6 @@ export default function DataWorkspace({
         </div>
       )}
 
-      {/* Cleaning Panel with Change Preview Integration */}
       {cleaningPanel && loaded && (
         <div className="card">
           <div className="card-header flex-between">
@@ -897,7 +873,7 @@ export default function DataWorkspace({
             )}
           </div>
 
-          <div className="pill-tabs mb-16" style={{ flexWrap: 'wrap' }}>
+          <div className="pill-tabs mb-16">
             {[
               ['duplicates', 'Remove Duplicates'],
               ['missing', 'Missing Values'],
@@ -1018,7 +994,6 @@ export default function DataWorkspace({
             </div>
           </div>
 
-          {/* Pipeline Container with Preview */}
           {pipeline.length > 0 && (
             <div className="pipeline-box mb-16">
               <div className="flex-between mb-8">
@@ -1067,7 +1042,6 @@ export default function DataWorkspace({
         </div>
       )}
 
-      {/* Empty State */}
       {!loaded && (
         <div className="card">
           <div className="empty-state">
@@ -1080,7 +1054,6 @@ export default function DataWorkspace({
         </div>
       )}
 
-      {/* Change Preview Modal (Shows Before vs After Diff before Apply) */}
       <ChangePreviewModal
         isOpen={previewModalOpen}
         onClose={() => setPreviewModalOpen(false)}

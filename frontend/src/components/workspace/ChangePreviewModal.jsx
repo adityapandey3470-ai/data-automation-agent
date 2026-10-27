@@ -35,7 +35,6 @@ export default function ChangePreviewModal({
   return (
     <div className="modal-backdrop">
       <div className="modal-card change-preview-modal" style={{ maxWidth: 900, width: '92vw', maxHeight: '90vh' }}>
-        {/* Modal Header */}
         <div className="modal-header flex-between">
           <div className="flex-gap">
             <Sliders size={20} className="text-emerald" />
@@ -58,9 +57,7 @@ export default function ChangePreviewModal({
           </button>
         </div>
 
-        {/* Modal Body */}
         <div className="modal-body" style={{ overflowY: 'auto', maxHeight: 'calc(90vh - 140px)', padding: '16px 20px' }}>
-          {/* Summary Metric Badges */}
           <div className="kpi-grid mb-16" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: 10 }}>
             <div className="kpi-card" style={{ padding: '10px 14px' }}>
               <div className="kpi-value" style={{ fontSize: 18 }}>
@@ -88,7 +85,6 @@ export default function ChangePreviewModal({
             </div>
           </div>
 
-          {/* Explanation Banner */}
           {summary && (
             <div className="alert alert-info mb-16" style={{ padding: '8px 12px', fontSize: 13 }}>
               <AlertCircle size={15} />
@@ -96,7 +92,6 @@ export default function ChangePreviewModal({
             </div>
           )}
 
-          {/* Affected Columns Indicator */}
           {affectedColumns.length > 0 && (
             <div className="flex-gap mb-12" style={{ flexWrap: 'wrap', alignItems: 'center' }}>
               <span className="text-xs font-semibold text-secondary">AFFECTED COLUMNS:</span>
@@ -108,7 +103,6 @@ export default function ChangePreviewModal({
             </div>
           )}
 
-          {/* Before vs After View Selector Tabs */}
           <div className="flex-between mb-12">
             <div className="pill-tabs">
               <button
@@ -131,7 +125,6 @@ export default function ChangePreviewModal({
             </span>
           </div>
 
-          {/* Tabular Preview Grid */}
           <div className="data-table-wrap mb-12">
             <div className="data-table-scroll" style={{ maxHeight: 260 }}>
               <table className="data-table">
@@ -173,7 +166,6 @@ export default function ChangePreviewModal({
           </div>
         </div>
 
-        {/* Modal Footer with Actions */}
         <div className="modal-footer flex-between" style={{ padding: '12px 20px', borderTop: '1px solid var(--border)' }}>
           <button className="btn btn-outline btn-sm" onClick={onClose} disabled={applying}>
             Cancel

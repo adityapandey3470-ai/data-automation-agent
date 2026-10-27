@@ -158,7 +158,6 @@ export default function ExportPage({ sheetName, sheets, loaded, onNavigate, curr
         </div>
       )}
 
-      {/* Executive PDF Analysis Report */}
       <div className="card mb-20" style={{ border: '1px solid var(--border)', background: 'var(--card-bg)' }}>
         <div className="card-header flex-between" style={{ alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
           <div>
@@ -185,7 +184,6 @@ export default function ExportPage({ sheetName, sheets, loaded, onNavigate, curr
         </div>
       </div>
 
-      {/* Full Workbook Export */}
       {sheets && sheets.length > 1 && (
         <div className="card mb-20">
           <div className="card-header flex-between">
@@ -208,7 +206,6 @@ export default function ExportPage({ sheetName, sheets, loaded, onNavigate, curr
         </div>
       )}
 
-      {/* Individual Sheets */}
       <div className="card">
         <div className="card-header">
           <h3 className="card-title">Individual Sheet Streams</h3>
