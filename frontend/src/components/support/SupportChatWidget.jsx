@@ -18,7 +18,6 @@ import {
   Zap
 } from '../icons/Icons';
 
-// Lightweight Markdown / Rich Text formatter for support assistant responses
 function FormattedMessage({ text }) {
   if (!text) return null;
 
@@ -42,7 +41,6 @@ function FormattedMessage({ text }) {
   };
 
   const renderInline = (str) => {
-    // Regex for bold **text**, code `text`, and standard links
     const parts = [];
     const regex = /(\*\*([^*]+)\*\*|`([^`]+)`)/g;
     let lastIdx = 0;
@@ -53,10 +51,8 @@ function FormattedMessage({ text }) {
         parts.push(str.slice(lastIdx, match.index));
       }
       if (match[2]) {
-        // Bold
         parts.push(<strong key={match.index}>{match[2]}</strong>);
       } else if (match[3]) {
-        // Code
         parts.push(<code key={match.index}>{match[3]}</code>);
       }
       lastIdx = regex.lastIndex;
@@ -98,12 +94,116 @@ function FormattedMessage({ text }) {
 
 export default function SupportChatWidget({ currentUser, onRequestAuth }) {
   const [isOpen, setIsOpen] = useState(false);
-  const [view, setView] = useState('chat'); // 'chat' | 'ticket'
+  const [view, setView] = useState('chat');
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [quickQuestions, setQuickQuestions] = useState([]);
 
-  // Ticket Form States
+  const [fabPos, setFabPos] = useState(() => {
+    try {
+      const saved = localStorage.getItem('tabufinery_support_fab_pos');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (typeof parsed.x === 'number' && typeof parsed.y === 'number') {
+          return parsed;
+        }
+      }
+    } catch {}
+    return null;
+  });
+  const [isDragging, setIsDragging] = useState(false);
+  const isDraggingRef = useRef(false);
+  const dragMovedRef = useRef(false);
+  const startPointerRef = useRef({ x: 0, y: 0 });
+  const startPosRef = useRef({ x: 0, y: 0 });
+  const fabRef = useRef(null);
+
+  const handleFabPointerDown = (e) => {
+    if (e.button !== 0 && e.pointerType === 'mouse') return;
+    const target = e.currentTarget;
+    try {
+      target.setPointerCapture(e.pointerId);
+    } catch {}
+
+    isDraggingRef.current = true;
+    dragMovedRef.current = false;
+    setIsDragging(true);
+
+    const rect = target.getBoundingClientRect();
+    startPointerRef.current = { x: e.clientX, y: e.clientY };
+    startPosRef.current = { x: rect.left, y: rect.top };
+  };
+
+  const handleFabPointerMove = (e) => {
+    if (!isDraggingRef.current) return;
+    const dx = e.clientX - startPointerRef.current.x;
+    const dy = e.clientY - startPointerRef.current.y;
+
+    if (!dragMovedRef.current && (Math.abs(dx) > 3 || Math.abs(dy) > 3)) {
+      dragMovedRef.current = true;
+    }
+
+    if (dragMovedRef.current) {
+      const btnWidth = fabRef.current?.offsetWidth || 150;
+      const btnHeight = fabRef.current?.offsetHeight || 44;
+      const margin = 10;
+      const maxX = Math.max(margin, window.innerWidth - btnWidth - margin);
+      const maxY = Math.max(margin, window.innerHeight - btnHeight - margin);
+
+      const newX = Math.max(margin, Math.min(maxX, startPosRef.current.x + dx));
+      const newY = Math.max(margin, Math.min(maxY, startPosRef.current.y + dy));
+
+      setFabPos({ x: newX, y: newY });
+    }
+  };
+
+  const handleFabPointerUp = (e) => {
+    if (!isDraggingRef.current) return;
+    isDraggingRef.current = false;
+    setIsDragging(false);
+    try {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    } catch {}
+
+    if (dragMovedRef.current) {
+      try {
+        const rect = fabRef.current?.getBoundingClientRect();
+        if (rect) {
+          localStorage.setItem('tabufinery_support_fab_pos', JSON.stringify({ x: rect.left, y: rect.top }));
+        }
+      } catch {}
+    }
+  };
+
+  const handleFabClick = (e) => {
+    if (dragMovedRef.current) {
+      e.preventDefault();
+      e.stopPropagation();
+      dragMovedRef.current = false;
+      return;
+    }
+    setIsOpen(true);
+  };
+
+  useEffect(() => {
+    const handleResize = () => {
+      setFabPos(prev => {
+        if (!prev) return null;
+        const btnWidth = fabRef.current?.offsetWidth || 150;
+        const btnHeight = fabRef.current?.offsetHeight || 44;
+        const margin = 10;
+        const maxX = Math.max(margin, window.innerWidth - btnWidth - margin);
+        const maxY = Math.max(margin, window.innerHeight - btnHeight - margin);
+        return {
+          x: Math.max(margin, Math.min(maxX, prev.x)),
+          y: Math.max(margin, Math.min(maxY, prev.y))
+        };
+      });
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
   const [ticketCategory, setTicketCategory] = useState('BUG');
   const [ticketSubject, setTicketSubject] = useState('');
   const [ticketMessage, setTicketMessage] = useState('');
@@ -111,7 +211,6 @@ export default function SupportChatWidget({ currentUser, onRequestAuth }) {
   const [ticketSuccess, setTicketSuccess] = useState(null);
   const [ticketError, setTicketError] = useState(null);
 
-  // Chat message thread
   const [messages, setMessages] = useState(() => [
     {
       id: 'welcome',
@@ -130,14 +229,12 @@ export default function SupportChatWidget({ currentUser, onRequestAuth }) {
 
   const messagesEndRef = useRef(null);
 
-  // Auto-scroll to latest message
   useEffect(() => {
     if (isOpen && view === 'chat') {
       messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }
   }, [messages, isOpen, view, loading]);
 
-  // Load starter questions
   useEffect(() => {
     const fetchQuickQuestions = async () => {
       try {
@@ -146,7 +243,6 @@ export default function SupportChatWidget({ currentUser, onRequestAuth }) {
           setQuickQuestions(res.data);
         }
       } catch {
-        // Fallback default
         setQuickQuestions([
           'How do I upload an Excel file?',
           'How does Undo/Redo work?',
@@ -196,7 +292,6 @@ export default function SupportChatWidget({ currentUser, onRequestAuth }) {
     }
 
     try {
-      // Build history for backend context (last 6 messages)
       const historyPayload = newMessages
         .filter(m => m.id !== 'welcome')
         .slice(-6)
@@ -298,13 +393,31 @@ export default function SupportChatWidget({ currentUser, onRequestAuth }) {
 
   return (
     <>
-      {/* Floating Action Button */}
       {!isOpen && (
         <button
+          ref={fabRef}
           className="support-fab"
-          onClick={() => setIsOpen(true)}
+          onClick={handleFabClick}
+          onPointerDown={handleFabPointerDown}
+          onPointerMove={handleFabPointerMove}
+          onPointerUp={handleFabPointerUp}
+          onPointerCancel={handleFabPointerUp}
           aria-label="Open AI Support Chat"
-          title="Need help? Ask Tabufinery Support"
+          title="Drag to reposition anywhere • Click to open Support & Help"
+          style={fabPos ? {
+            left: `${fabPos.x}px`,
+            top: `${fabPos.y}px`,
+            bottom: 'auto',
+            right: 'auto',
+            cursor: isDragging ? 'grabbing' : 'grab',
+            userSelect: 'none',
+            touchAction: 'none',
+            transition: isDragging ? 'none' : 'box-shadow 0.2s ease, transform 0.2s ease'
+          } : {
+            cursor: isDragging ? 'grabbing' : 'grab',
+            userSelect: 'none',
+            touchAction: 'none'
+          }}
         >
           <div className="support-fab-pulse" />
           <Headphones size={18} />
@@ -312,10 +425,32 @@ export default function SupportChatWidget({ currentUser, onRequestAuth }) {
         </button>
       )}
 
-      {/* Floating Chat Modal / Window */}
       {isOpen && (
-        <div className="support-chat-window">
-          {/* Header */}
+        <div
+          className="support-chat-window"
+          style={(() => {
+            if (typeof window !== 'undefined' && window.innerWidth <= 640) {
+              return undefined;
+            }
+            if (!fabPos) return undefined;
+            const chatWidth = Math.min(395, window.innerWidth - 32);
+            const chatHeight = Math.min(560, window.innerHeight - 80);
+            const margin = 16;
+            const left = Math.max(margin, Math.min(window.innerWidth - chatWidth - margin, fabPos.x));
+            let top;
+            if (fabPos.y > window.innerHeight / 2) {
+              top = Math.max(margin, fabPos.y - chatHeight - 12);
+            } else {
+              top = Math.min(window.innerHeight - chatHeight - margin, fabPos.y + 48);
+            }
+            return {
+              left: `${left}px`,
+              top: `${top}px`,
+              bottom: 'auto',
+              right: 'auto'
+            };
+          })()}
+        >
           <div className="support-header">
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
               <div
@@ -369,23 +504,19 @@ export default function SupportChatWidget({ currentUser, onRequestAuth }) {
             </div>
           </div>
 
-          {/* VIEW 1: Chat Conversation */}
           {view === 'chat' && (
             <>
               <div className="support-body">
-                {/* Message Stream */}
                 {messages.map((m) => (
                   <div key={m.id} className={`support-msg ${m.role}`}>
                     {m.role === 'assistant' ? (
                       <>
                         <FormattedMessage text={m.text} />
-                        {/* Footer info & Follow up chips */}
                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 6, fontSize: 10, color: 'var(--text-muted)' }}>
                           <span>{m.engine || 'Support Bot'}</span>
                           <span>{m.timestamp}</span>
                         </div>
 
-                        {/* Suggested Follow up chips */}
                         {m.suggestedFollowUps && m.suggestedFollowUps.length > 0 && (
                           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginTop: 8 }}>
                             {m.suggestedFollowUps.map((chip, i) => (
@@ -408,7 +539,6 @@ export default function SupportChatWidget({ currentUser, onRequestAuth }) {
                           </div>
                         )}
 
-                        {/* Direct sign in prompt if authentication is required */}
                         {!currentUser && m.needsAuth && (
                           <div style={{ marginTop: 8, paddingTop: 6, borderTop: '1px solid var(--border)', fontSize: 11 }}>
                             <button
@@ -420,7 +550,6 @@ export default function SupportChatWidget({ currentUser, onRequestAuth }) {
                           </div>
                         )}
 
-                        {/* Direct escalation action if applicable and user is authenticated */}
                         {m.canEscalateToTicket && currentUser && (
                           <div style={{ marginTop: 8, paddingTop: 6, borderTop: '1px solid var(--border)', fontSize: 11 }}>
                             <span style={{ color: 'var(--text-muted)' }}>Need further help? </span>
@@ -444,7 +573,6 @@ export default function SupportChatWidget({ currentUser, onRequestAuth }) {
                   </div>
                 ))}
 
-                {/* Typing Indicator */}
                 {loading && (
                   <div className="support-msg assistant" style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px' }}>
                     <div style={{ display: 'flex', gap: 4 }}>
@@ -459,7 +587,6 @@ export default function SupportChatWidget({ currentUser, onRequestAuth }) {
                 <div ref={messagesEndRef} />
               </div>
 
-              {/* Chat Input Bar */}
               <div className="support-footer">
                 <button
                   className="btn-icon"
@@ -492,7 +619,6 @@ export default function SupportChatWidget({ currentUser, onRequestAuth }) {
             </>
           )}
 
-          {/* VIEW 2: Ticket Form */}
           {view === 'ticket' && (
             <div className="support-body" style={{ display: 'flex', flexDirection: 'column' }}>
               {!currentUser ? (
@@ -613,7 +739,14 @@ export default function SupportChatWidget({ currentUser, onRequestAuth }) {
                       className="input-field"
                       value={ticketCategory}
                       onChange={(e) => setTicketCategory(e.target.value)}
-                      style={{ height: 34, fontSize: 12 }}
+                      style={{
+                        height: 38,
+                        minHeight: 38,
+                        padding: '7px 32px 7px 12px',
+                        fontSize: 13,
+                        lineHeight: '22px',
+                        cursor: 'pointer'
+                      }}
                     >
                       <option value="BUG">Bug or Processing Failure</option>
                       <option value="DATA_PROCESSING">Data Cleaning / Formula Question</option>
@@ -633,7 +766,13 @@ export default function SupportChatWidget({ currentUser, onRequestAuth }) {
                       placeholder="Brief summary of the problem"
                       value={ticketSubject}
                       onChange={(e) => setTicketSubject(e.target.value)}
-                      style={{ height: 34, fontSize: 12 }}
+                      style={{
+                        height: 38,
+                        minHeight: 38,
+                        padding: '7px 12px',
+                        fontSize: 13,
+                        lineHeight: '22px'
+                      }}
                     />
                   </div>
 

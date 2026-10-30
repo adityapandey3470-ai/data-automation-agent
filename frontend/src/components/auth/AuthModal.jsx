@@ -16,7 +16,6 @@ export default function AuthModal({ isOpen, onClose, onAuthSuccess, initialMode 
   const [success, setSuccess] = useState(null);
   const [smtpNotice, setSmtpNotice] = useState(null);
 
-  // Check for resetToken in URL query params on mount
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const urlToken = params.get('resetToken');
@@ -162,7 +161,6 @@ export default function AuthModal({ isOpen, onClose, onAuthSuccess, initialMode 
   return (
     <div className="auth-overlay">
       <div className="auth-card">
-        {/* Header Close button if modal is optional / dismissable */}
         {!forced && onClose && (
           <button
             className="modal-close-btn btn-icon"
@@ -173,7 +171,6 @@ export default function AuthModal({ isOpen, onClose, onAuthSuccess, initialMode 
           </button>
         )}
 
-        {/* Brand Header */}
         <div className="auth-header-brand">
           <div className="auth-brand-logo">
             <LogoMark size={36} />
@@ -191,7 +188,6 @@ export default function AuthModal({ isOpen, onClose, onAuthSuccess, initialMode 
           </p>
         </div>
 
-        {/* Feedback alerts */}
         {error && (
           <div className="alert alert-error mb-16 flex-gap" style={{ alignItems: 'flex-start' }}>
             <AlertCircle size={15} style={{ flexShrink: 0, marginTop: 2 }} />
@@ -263,7 +259,6 @@ export default function AuthModal({ isOpen, onClose, onAuthSuccess, initialMode 
           </div>
         )}
 
-        {/* Mode Switcher Tabs (Login / Signup) */}
         {(mode === 'login' || mode === 'signup') && (
           <div className="auth-tab-group">
             <button
@@ -283,7 +278,6 @@ export default function AuthModal({ isOpen, onClose, onAuthSuccess, initialMode 
           </div>
         )}
 
-        {/* ==================== LOGIN FORM ==================== */}
         {mode === 'login' && (
           <form onSubmit={handleLogin}>
             <div className="auth-form-group">
@@ -351,7 +345,6 @@ export default function AuthModal({ isOpen, onClose, onAuthSuccess, initialMode 
           </form>
         )}
 
-        {/* ==================== SIGNUP FORM ==================== */}
         {mode === 'signup' && (
           <form onSubmit={handleSignup}>
             <div className="auth-form-group">
@@ -460,7 +453,6 @@ export default function AuthModal({ isOpen, onClose, onAuthSuccess, initialMode 
           </form>
         )}
 
-        {/* ==================== FORGOT PASSWORD FORM ==================== */}
         {mode === 'forgot' && (
           <form onSubmit={handleForgotPassword}>
             <p className="text-secondary mb-16" style={{ fontSize: 13, lineHeight: 1.5 }}>
@@ -514,7 +506,6 @@ export default function AuthModal({ isOpen, onClose, onAuthSuccess, initialMode 
           </form>
         )}
 
-        {/* ==================== RESET PASSWORD FORM ==================== */}
         {mode === 'reset' && (
           <form onSubmit={handleResetPassword}>
             <p className="text-secondary mb-16" style={{ fontSize: 13, lineHeight: 1.5 }}>
@@ -615,7 +606,6 @@ export default function AuthModal({ isOpen, onClose, onAuthSuccess, initialMode 
           </form>
         )}
 
-        {/* Bottom switch link for Login / Signup */}
         {(mode === 'login' || mode === 'signup') && (
           <div className="auth-footer-links">
             <div>

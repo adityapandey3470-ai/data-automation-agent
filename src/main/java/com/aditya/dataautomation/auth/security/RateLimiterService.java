@@ -49,25 +49,35 @@ public class RateLimiterService {
         requestWindows.compute(key, (k, timestamps) -> {
             if (timestamps == null) {
                 timestamps = new ArrayList<>();
-            } else {
+            }
+            synchronized (timestamps) {
                 timestamps.removeIf(t -> t < windowStart);
-            }
 
-            if (timestamps.size() >= maxRequests) {
-                // Determine the oldest active request that must roll out of the sliding window
-                long oldestTimestamp = timestamps.get(0);
-                long expiryTime = oldestTimestamp + windowMillis;
-                long remainingMillis = Math.max(0, expiryTime - now);
-                long retryAfterSec = Math.max(1, (remainingMillis + 999L) / 1000L);
-                result[0] = RateLimitResult.reject(retryAfterSec);
-            } else {
-                timestamps.add(now);
-                result[0] = RateLimitResult.permit();
+                if (timestamps.size() >= maxRequests) {
+                    // Determine the oldest active request that must roll out of the sliding window
+                    long oldestTimestamp = timestamps.get(0);
+                    long expiryTime = oldestTimestamp + windowMillis;
+                    long remainingMillis = Math.max(0, expiryTime - now);
+                    long retryAfterSec = Math.max(1, (remainingMillis + 999L) / 1000L);
+                    result[0] = RateLimitResult.reject(retryAfterSec);
+                } else {
+                    timestamps.add(now);
+                    result[0] = RateLimitResult.permit();
+                }
+                return timestamps;
             }
-            return timestamps;
         });
 
         return result[0];
+    }
+
+    /**
+     * Automatic scheduled background maintenance to evict expired rate-limit buckets.
+     */
+    @org.springframework.scheduling.annotation.Scheduled(fixedRate = 60000)
+    public void scheduledEviction() {
+        long fiveMinutesAgo = System.currentTimeMillis() - 300_000L;
+        pruneExpiredWindows(fiveMinutesAgo);
     }
 
     /**

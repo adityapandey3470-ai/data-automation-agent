@@ -71,22 +71,34 @@ public class JwtService {
         }
     }
 
-    public Long extractUserId(String token) {
+    public Map<?, ?> extractAllClaimsIfValid(String token) {
+        if (token == null || !validateToken(token)) {
+            return null;
+        }
         try {
             String[] parts = token.split("\\.");
             byte[] payloadBytes = Base64.getUrlDecoder().decode(parts[1]);
-            Map<?, ?> claims = objectMapper.readValue(payloadBytes, Map.class);
-            return Long.parseLong((String) claims.get("sub"));
+            return objectMapper.readValue(payloadBytes, Map.class);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    public Long extractUserId(String token) {
+        Map<?, ?> claims = extractAllClaimsIfValid(token);
+        if (claims == null) return null;
+        try {
+            Object sub = claims.get("sub");
+            return sub != null ? Long.parseLong(String.valueOf(sub)) : null;
         } catch (Exception e) {
             return null;
         }
     }
 
     public String extractEmail(String token) {
+        Map<?, ?> claims = extractAllClaimsIfValid(token);
+        if (claims == null) return null;
         try {
-            String[] parts = token.split("\\.");
-            byte[] payloadBytes = Base64.getUrlDecoder().decode(parts[1]);
-            Map<?, ?> claims = objectMapper.readValue(payloadBytes, Map.class);
             return (String) claims.get("email");
         } catch (Exception e) {
             return null;
@@ -94,10 +106,9 @@ public class JwtService {
     }
 
     public String extractRole(String token) {
+        Map<?, ?> claims = extractAllClaimsIfValid(token);
+        if (claims == null) return null;
         try {
-            String[] parts = token.split("\\.");
-            byte[] payloadBytes = Base64.getUrlDecoder().decode(parts[1]);
-            Map<?, ?> claims = objectMapper.readValue(payloadBytes, Map.class);
             String role = (String) claims.get("role");
             return role != null ? role : "ROLE_USER";
         } catch (Exception e) {

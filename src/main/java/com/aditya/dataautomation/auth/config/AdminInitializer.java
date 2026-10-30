@@ -51,14 +51,24 @@ public class AdminInitializer implements ApplicationRunner {
             User user = existing.get();
             // Prohibit automatic privilege escalation of existing regular accounts
             if (!"ROLE_ADMIN".equals(user.getRole())) {
-                throw new IllegalStateException(
-                        String.format("Startup halted for security: The configured admin email '%s' already belongs to an existing user with role '%s'. " +
-                                "Automatic privilege elevation of regular accounts is prohibited. " +
-                                "Please specify a different APP_ADMIN_EMAIL or perform role elevation via explicit manual intervention.",
-                                email, user.getRole())
-                );
+                if (isProduction) {
+                    throw new IllegalStateException(
+                            String.format("Startup halted for security: The configured admin email '%s' already belongs to an existing user with role '%s'. " +
+                                    "Automatic privilege elevation of regular accounts is prohibited in production. " +
+                                    "Please specify a different APP_ADMIN_EMAIL or perform role elevation via explicit manual intervention.",
+                                    email, user.getRole())
+                    );
+                } else {
+                    user.setRole("ROLE_ADMIN");
+                    if (adminPassword != null && !adminPassword.isBlank()) {
+                        user.setPasswordHash(passwordEncoder.encode(adminPassword.trim()));
+                    }
+                    userRepository.save(user);
+                    log.info("Elevated existing account '{}' to ROLE_ADMIN in development mode.", email);
+                }
+            } else {
+                log.info("Administrator {} is already initialized. Existing password and account data preserved.", email);
             }
-            log.info("Administrator {} is already initialized. Existing password and account data preserved.", email);
         } else {
             // Provision initial administrator with BCrypt password hash
             User admin = User.builder()

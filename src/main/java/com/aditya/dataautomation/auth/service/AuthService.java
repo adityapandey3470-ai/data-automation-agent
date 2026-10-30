@@ -98,7 +98,6 @@ public class AuthService {
         if (userOpt.isPresent() && userOpt.get().isEnabled()) {
             User user = userOpt.get();
 
-            // Clear previous tokens for this user
             passwordResetTokenRepository.deleteByUserId(user.getId());
 
             // Generate cryptographically secure random reset token (256-bit entropy, URL-safe Base64)

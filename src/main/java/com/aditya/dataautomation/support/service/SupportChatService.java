@@ -49,11 +49,9 @@ public class SupportChatService {
             throw new InvalidRequestException("Message exceeds maximum length of 1000 characters.");
         }
 
-        // Rate limit check
         Long userId = currentUser != null && currentUser.getId() != null ? currentUser.getId() : 0L;
         checkRateLimit(userId);
 
-        // Prepare bounded history (last 6 messages)
         List<Map<String, String>> historySnippet = new ArrayList<>();
         if (request.getHistory() != null) {
             List<ChatMessage> history = request.getHistory();
@@ -107,7 +105,6 @@ public class SupportChatService {
             if (timestamps == null) {
                 timestamps = new ArrayList<>();
             }
-            // Remove timestamps older than 1 minute
             timestamps.removeIf(t -> t < oneMinuteAgo);
             if (timestamps.size() >= MAX_REQUESTS_PER_MINUTE) {
                 throw new InvalidRequestException("Support chat rate limit exceeded. Please wait a moment before sending another message.");

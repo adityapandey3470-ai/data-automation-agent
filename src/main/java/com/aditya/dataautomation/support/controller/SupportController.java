@@ -1,6 +1,7 @@
 package com.aditya.dataautomation.support.controller;
 
 import com.aditya.dataautomation.auth.security.UserPrincipal;
+import com.aditya.dataautomation.support.dto.CreateBugReportRequest;
 import com.aditya.dataautomation.support.dto.CreateTicketRequest;
 import com.aditya.dataautomation.support.dto.SupportChatRequest;
 import com.aditya.dataautomation.support.dto.SupportChatResponse;
@@ -44,6 +45,16 @@ public class SupportController {
             @AuthenticationPrincipal UserPrincipal principal) {
 
         TicketResponse response = ticketService.createTicket(request, principal);
+        return ResponseEntity.ok(response);
+    }
+
+    @PostMapping("/bug-report")
+    @Operation(summary = "Submit a bug report", description = "Submits a user bug report with description, steps to reproduce, and severity")
+    public ResponseEntity<TicketResponse> createBugReport(
+            @Valid @RequestBody CreateBugReportRequest request,
+            @AuthenticationPrincipal UserPrincipal principal) {
+
+        TicketResponse response = ticketService.createBugReport(request, principal);
         return ResponseEntity.ok(response);
     }
 

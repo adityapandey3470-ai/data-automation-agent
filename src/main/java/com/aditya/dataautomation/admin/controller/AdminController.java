@@ -1,11 +1,10 @@
 package com.aditya.dataautomation.admin.controller;
 
-import com.aditya.dataautomation.admin.dto.AdminStatsDto;
-import com.aditya.dataautomation.admin.dto.AdminUserDto;
-import com.aditya.dataautomation.admin.dto.UpdateRoleRequest;
-import com.aditya.dataautomation.admin.dto.UpdateStatusRequest;
+import com.aditya.dataautomation.admin.dto.*;
+import com.aditya.dataautomation.admin.entity.AuditLog;
 import com.aditya.dataautomation.admin.service.AdminService;
 import com.aditya.dataautomation.auth.security.UserPrincipal;
+import com.aditya.dataautomation.support.entity.SupportTicket;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -46,7 +45,7 @@ public class AdminController {
             @AuthenticationPrincipal UserPrincipal principal,
             @PathVariable Long id,
             @Valid @RequestBody UpdateStatusRequest request) {
-        AdminUserDto dto = adminService.setUserStatus(principal.getId(), id, request.getEnabled());
+        AdminUserDto dto = adminService.setUserStatus(principal.getId(), principal.getUsername(), id, request.getEnabled());
         return ResponseEntity.ok(dto);
     }
 
@@ -56,7 +55,44 @@ public class AdminController {
             @AuthenticationPrincipal UserPrincipal principal,
             @PathVariable Long id,
             @Valid @RequestBody UpdateRoleRequest request) {
-        AdminUserDto dto = adminService.setUserRole(principal.getId(), id, request.getRole());
+        AdminUserDto dto = adminService.setUserRole(principal.getId(), principal.getUsername(), id, request.getRole());
         return ResponseEntity.ok(dto);
+    }
+
+    @GetMapping("/tickets")
+    @Operation(summary = "List all support tickets and user bug reports")
+    public ResponseEntity<List<SupportTicket>> listTickets() {
+        return ResponseEntity.ok(adminService.listTickets());
+    }
+
+    @RequestMapping(value = "/tickets/{id}/status", method = {RequestMethod.PATCH, RequestMethod.PUT})
+    @Operation(summary = "Update support ticket or bug report status")
+    public ResponseEntity<SupportTicket> updateTicketStatus(
+            @AuthenticationPrincipal UserPrincipal principal,
+            @PathVariable Long id,
+            @Valid @RequestBody UpdateTicketStatusRequest request) {
+        SupportTicket updated = adminService.updateTicketStatus(principal.getId(), principal.getUsername(), id, request.getStatus());
+        return ResponseEntity.ok(updated);
+    }
+
+    @GetMapping("/files")
+    @Operation(summary = "List all uploaded files and datasets across all users")
+    public ResponseEntity<List<AdminFileDto>> listFiles() {
+        return ResponseEntity.ok(adminService.listAllFiles());
+    }
+
+    @DeleteMapping("/files/{fileId}")
+    @Operation(summary = "Delete an uploaded file or project dataset")
+    public ResponseEntity<Void> deleteFile(
+            @AuthenticationPrincipal UserPrincipal principal,
+            @PathVariable String fileId) {
+        adminService.deleteFile(principal.getId(), principal.getUsername(), fileId);
+        return ResponseEntity.noContent().build();
+    }
+
+    @GetMapping("/audit-logs")
+    @Operation(summary = "List recent administrative security and action logs")
+    public ResponseEntity<List<AuditLog>> listAuditLogs() {
+        return ResponseEntity.ok(adminService.listAuditLogs());
     }
 }

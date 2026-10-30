@@ -8,14 +8,14 @@ import com.aditya.dataautomation.auth.dto.LoginRequest;
 import com.aditya.dataautomation.auth.dto.SignupRequest;
 import com.aditya.dataautomation.auth.service.AuthService;
 import com.aditya.dataautomation.export.service.PdfReportExportService;
-import com.aditya.dataautomation.model.excel.ExcelSheetData;
-import com.aditya.dataautomation.model.excel.ExcelWorkbookData;
+import com.aditya.dataautomation.excel.model.ExcelSheetData;
+import com.aditya.dataautomation.excel.model.ExcelWorkbookData;
 import com.aditya.dataautomation.project.dto.ProjectDetailDto;
 import com.aditya.dataautomation.project.dto.ProjectSummaryDto;
 import com.aditya.dataautomation.project.dto.RenameProjectRequest;
 import com.aditya.dataautomation.project.dto.SaveProjectRequest;
 import com.aditya.dataautomation.project.service.ProjectService;
-import com.aditya.dataautomation.service.WorkbookSessionHolder;
+import com.aditya.dataautomation.workbook.service.WorkbookSessionHolder;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -128,7 +128,7 @@ public class AuthAndProjectPersistenceIntegrationTest {
                 .sheets(List.of(sheet))
                 .build();
 
-        sessionHolder.store(workbook, "Initial Upload");
+        sessionHolder.storeForUser(user1Id, workbook, "Initial Upload");
 
         // 2. User 1 saves project
         SaveProjectRequest saveReq = SaveProjectRequest.builder()
@@ -162,13 +162,13 @@ public class AuthAndProjectPersistenceIntegrationTest {
         assertThat(renamed.getName()).isEqualTo("Q3 Regional Performance Updated");
 
         // 7. Clear memory session and reopen saved project
-        sessionHolder.clear();
-        assertThat(sessionHolder.get()).isNull();
+        sessionHolder.clearForUser(user1Id);
+        assertThat(sessionHolder.getForUser(user1Id)).isNull();
 
         ProjectDetailDto opened = projectService.openProject(user1Id, saved.getId());
         assertThat(opened.getName()).isEqualTo("Q3 Regional Performance Updated");
-        assertThat(sessionHolder.get()).isNotNull();
-        assertThat(sessionHolder.get().getSheets().get(0).getRowCount()).isEqualTo(3);
+        assertThat(sessionHolder.getForUser(user1Id)).isNotNull();
+        assertThat(sessionHolder.getForUser(user1Id).getSheets().get(0).getRowCount()).isEqualTo(3);
 
         // 8. Delete project
         projectService.deleteProject(user1Id, saved.getId());

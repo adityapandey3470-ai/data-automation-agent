@@ -7,6 +7,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
@@ -23,6 +24,12 @@ public class RateLimitingFilter extends OncePerRequestFilter {
 
     private final RateLimiterService rateLimiterService;
     private final ObjectMapper objectMapper;
+
+    @Value("${app.security.behind-proxy:false}")
+    private boolean behindProxy;
+
+    @Value("${app.security.trusted-proxies:127.0.0.1,::1}")
+    private String trustedProxies;
 
     @Override
     protected void doFilterInternal(HttpServletRequest request,
@@ -81,7 +88,7 @@ public class RateLimitingFilter extends OncePerRequestFilter {
         }
 
         // 6. File upload limit: max 20 uploads / 60s per IP
-        if ("POST".equalsIgnoreCase(method) && path.startsWith("/api/v1/files/")) {
+        if ("POST".equalsIgnoreCase(method) && (path.startsWith("/api/v1/files/") || path.startsWith("/api/v1/jobs/"))) {
             res = rateLimiterService.tryAcquireWithResult("upload:" + clientIp, 20, 60);
             if (!res.allowed()) {
                 rejectRateLimit(response, path, "File upload rate limit reached. Please wait a moment before uploading again.", res.retryAfterSeconds());
@@ -102,11 +109,34 @@ public class RateLimitingFilter extends OncePerRequestFilter {
     }
 
     private String extractClientIp(HttpServletRequest request) {
-        String xf = request.getHeader("X-Forwarded-For");
-        if (xf != null && !xf.isBlank()) {
-            return xf.split(",")[0].trim();
+        String remoteAddr = request.getRemoteAddr() != null ? request.getRemoteAddr() : "unknown";
+
+        // Never trust client-supplied forwarded headers unless explicitly configured behind a trusted proxy
+        if (!behindProxy) {
+            return remoteAddr;
         }
-        return request.getRemoteAddr() != null ? request.getRemoteAddr() : "unknown";
+
+        if (isTrustedProxy(remoteAddr)) {
+            String xf = request.getHeader("X-Forwarded-For");
+            if (xf != null && !xf.isBlank()) {
+                return xf.split(",")[0].trim();
+            }
+        }
+
+        return remoteAddr;
+    }
+
+    private boolean isTrustedProxy(String ip) {
+        if (ip == null || ip.isBlank() || trustedProxies == null || trustedProxies.isBlank()) {
+            return false;
+        }
+        String[] trustedList = trustedProxies.split(",");
+        for (String trusted : trustedList) {
+            if (trusted.trim().equalsIgnoreCase(ip.trim())) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private void rejectRateLimit(HttpServletResponse response, String path, String message, long retryAfterSeconds) throws IOException {
