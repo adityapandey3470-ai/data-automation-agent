@@ -2,9 +2,9 @@ package com.aditya.dataautomation.dashboard.controller;
 
 import com.aditya.dataautomation.dashboard.model.Dashboard;
 import com.aditya.dataautomation.dashboard.model.WidgetType;
-import com.aditya.dataautomation.model.excel.ExcelSheetData;
-import com.aditya.dataautomation.model.excel.ExcelWorkbookData;
-import com.aditya.dataautomation.service.WorkbookSessionHolder;
+import com.aditya.dataautomation.excel.model.ExcelSheetData;
+import com.aditya.dataautomation.excel.model.ExcelWorkbookData;
+import com.aditya.dataautomation.workbook.service.WorkbookSessionHolder;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;

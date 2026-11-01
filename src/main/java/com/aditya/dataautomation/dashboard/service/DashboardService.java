@@ -2,7 +2,7 @@ package com.aditya.dataautomation.dashboard.service;
 
 import com.aditya.dataautomation.dashboard.model.Dashboard;
 import com.aditya.dataautomation.dashboard.model.DashboardWidget;
-import com.aditya.dataautomation.model.excel.ExcelWorkbookData;
+import com.aditya.dataautomation.excel.model.ExcelWorkbookData;
 
 import java.util.List;
 

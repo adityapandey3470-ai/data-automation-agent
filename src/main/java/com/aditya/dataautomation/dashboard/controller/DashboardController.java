@@ -1,18 +1,22 @@
 package com.aditya.dataautomation.dashboard.controller;
 
+import com.aditya.dataautomation.auth.entity.User;
+import com.aditya.dataautomation.auth.repository.UserRepository;
 import com.aditya.dataautomation.auth.security.UserPrincipal;
 import com.aditya.dataautomation.dashboard.exception.DashboardException;
 import com.aditya.dataautomation.dashboard.model.Dashboard;
 import com.aditya.dataautomation.dashboard.model.DashboardWidget;
 import com.aditya.dataautomation.dashboard.service.DashboardService;
-import com.aditya.dataautomation.model.excel.ExcelWorkbookData;
-import com.aditya.dataautomation.service.WorkbookSessionHolder;
+import com.aditya.dataautomation.excel.model.ExcelWorkbookData;
+import com.aditya.dataautomation.workbook.service.WorkbookSessionHolder;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -26,13 +30,22 @@ public class DashboardController {
 
     private final DashboardService dashboardService;
     private final WorkbookSessionHolder workbookSessionHolder;
+    private final UserRepository userRepository;
 
     private Long getCurrentUserId() {
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
-        if (auth != null && auth.getPrincipal() instanceof UserPrincipal p) {
+        if (auth == null || !auth.isAuthenticated() || "anonymousUser".equals(auth.getPrincipal())) {
+            throw new AccessDeniedException("Authentication required to access dashboards");
+        }
+        if (auth.getPrincipal() instanceof UserPrincipal p) {
             return p.getId();
         }
-        return 0L;
+        if (auth.getPrincipal() instanceof UserDetails ud) {
+            return userRepository.findByEmailIgnoreCase(ud.getUsername())
+                    .map(User::getId)
+                    .orElseThrow(() -> new AccessDeniedException("User not found: " + ud.getUsername()));
+        }
+        throw new AccessDeniedException("Valid user identity required");
     }
 
     @PostMapping("/create")
@@ -134,10 +147,6 @@ public class DashboardController {
         dashboardService.deleteDashboard(userId, dashboardId);
         return ResponseEntity.ok(Map.of("success", true, "message", "Dashboard deleted", "dashboardId", dashboardId));
     }
-
-    // ========================================================================
-    // Helpers
-    // ========================================================================
 
     private ExcelWorkbookData getWorkbookOrThrow(Long userId, String fileId) {
         ExcelWorkbookData workbook = fileId != null 

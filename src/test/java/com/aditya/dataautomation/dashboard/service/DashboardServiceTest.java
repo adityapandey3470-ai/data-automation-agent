@@ -3,8 +3,8 @@ package com.aditya.dataautomation.dashboard.service;
 import com.aditya.dataautomation.dashboard.exception.DashboardException;
 import com.aditya.dataautomation.dashboard.model.*;
 import com.aditya.dataautomation.dashboard.service.impl.DashboardServiceImpl;
-import com.aditya.dataautomation.model.excel.ExcelSheetData;
-import com.aditya.dataautomation.model.excel.ExcelWorkbookData;
+import com.aditya.dataautomation.excel.model.ExcelSheetData;
+import com.aditya.dataautomation.excel.model.ExcelWorkbookData;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -156,7 +156,7 @@ class DashboardServiceTest {
                     .build();
 
             DashboardWidget added = service.addWidget(dashboardId, widget, workbook);
-            assertThat(added.getKpiValue()).isEqualTo(new BigDecimal("196000"));
+            assertThat((BigDecimal) added.getKpiValue()).isEqualByComparingTo(new BigDecimal("196000"));
         }
 
         @Test
@@ -170,7 +170,7 @@ class DashboardServiceTest {
                     .build();
 
             DashboardWidget added = service.addWidget(dashboardId, widget, workbook);
-            assertThat(added.getKpiValue()).isEqualTo(new BigDecimal("39200.0000"));
+            assertThat((BigDecimal) added.getKpiValue()).isEqualByComparingTo(new BigDecimal("39200"));
         }
 
         @Test
@@ -184,7 +184,7 @@ class DashboardServiceTest {
                     .build();
 
             DashboardWidget added = service.addWidget(dashboardId, widget, workbook);
-            assertThat(added.getKpiValue()).isEqualTo(new BigDecimal("2000"));
+            assertThat((BigDecimal) added.getKpiValue()).isEqualByComparingTo(new BigDecimal("2000"));
         }
 
         @Test
@@ -198,7 +198,7 @@ class DashboardServiceTest {
                     .build();
 
             DashboardWidget added = service.addWidget(dashboardId, widget, workbook);
-            assertThat(added.getKpiValue()).isEqualTo(new BigDecimal("120000"));
+            assertThat((BigDecimal) added.getKpiValue()).isEqualByComparingTo(new BigDecimal("120000"));
         }
     }
 
@@ -268,11 +268,11 @@ class DashboardServiceTest {
 
             ChartConfig.ChartDataPoint delhi = points.stream()
                     .filter(p -> "Delhi".equals(p.getLabel())).findFirst().orElseThrow();
-            assertThat(delhi.getValue()).isEqualTo(new BigDecimal("189000"));
+            assertThat(((Number) delhi.getValue()).doubleValue()).isEqualTo(189000.0);
 
             ChartConfig.ChartDataPoint noida = points.stream()
                     .filter(p -> "Noida".equals(p.getLabel())).findFirst().orElseThrow();
-            assertThat(noida.getValue()).isEqualTo(new BigDecimal("7000"));
+            assertThat(((Number) noida.getValue()).doubleValue()).isEqualTo(7000.0);
         }
 
         @Test
@@ -499,7 +499,7 @@ class DashboardServiceTest {
                     .findFirst()
                     .orElse(null);
             assertThat(revKpi).isNotNull();
-            assertThat(revKpi.getKpiValue()).isEqualTo(new BigDecimal("196000"));
+            assertThat((BigDecimal) revKpi.getKpiValue()).isEqualByComparingTo(new BigDecimal("196000"));
 
             boolean hasTrendChart = d.getWidgets().stream()
                     .anyMatch(w -> w.getType() == WidgetType.AREA_CHART);
@@ -563,7 +563,7 @@ class DashboardServiceTest {
                     .findFirst()
                     .orElse(null);
             assertThat(amountKpi).isNotNull();
-            assertThat(amountKpi.getKpiValue()).isEqualTo(new BigDecimal("800"));
+            assertThat((BigDecimal) amountKpi.getKpiValue()).isEqualByComparingTo(new BigDecimal("800"));
 
             boolean hasOrderIdKpi = d.getWidgets().stream()
                     .anyMatch(w -> w.getType() == WidgetType.KPI && "order_id".equalsIgnoreCase(w.getColumnName()));
@@ -600,6 +600,161 @@ class DashboardServiceTest {
                     .build(), workbook);
 
             assertThat(donut.getChartConfig().getDataPoints()).hasSize(2);
+        }
+    }
+
+    // ========================================================================
+    // Dashboard Enhancements (Fix 1, Fix 2, Fix 3)
+    // ========================================================================
+
+    @Nested
+    @DisplayName("Dashboard Enhancements")
+    class DashboardEnhancements {
+
+        @Test
+        @DisplayName("Fix 1: Smart default aggregation chooses AVERAGE for UnitPrice with 'Average UnitPrice' title")
+        void smartAggregationUnitPrice() {
+            List<String> headers = List.of("Product", "UnitPrice", "Quantity");
+            List<Map<String, Object>> rows = List.of(
+                    Map.of("Product", "Shirt", "UnitPrice", 500.0, "Quantity", 2L),
+                    Map.of("Product", "Pant", "UnitPrice", 1000.0, "Quantity", 1L)
+            );
+            ExcelSheetData sheet = ExcelSheetData.builder()
+                    .sheetName("Inventory")
+                    .headers(headers)
+                    .rows(rows)
+                    .build();
+            ExcelWorkbookData wb = ExcelWorkbookData.builder()
+                    .fileName("inventory.xlsx")
+                    .sheets(List.of(sheet))
+                    .build();
+
+            Dashboard d = service.autoGenerateDashboard("Inv Dash", "Inventory", wb);
+
+            DashboardWidget unitPriceKpi = d.getWidgets().stream()
+                    .filter(w -> w.getType() == WidgetType.KPI && "UnitPrice".equalsIgnoreCase(w.getColumnName()))
+                    .findFirst()
+                    .orElse(null);
+
+            assertThat(unitPriceKpi).isNotNull();
+            assertThat(unitPriceKpi.getAggregation()).isEqualTo("AVERAGE");
+            assertThat(unitPriceKpi.getTitle()).isEqualTo("Average UnitPrice");
+            assertThat((BigDecimal) unitPriceKpi.getKpiValue()).isEqualByComparingTo(new BigDecimal("750"));
+
+            DashboardWidget quantityKpi = d.getWidgets().stream()
+                    .filter(w -> w.getType() == WidgetType.KPI && "Quantity".equalsIgnoreCase(w.getColumnName()))
+                    .findFirst()
+                    .orElse(null);
+
+            assertThat(quantityKpi).isNotNull();
+            assertThat(quantityKpi.getAggregation()).isEqualTo("SUM");
+            assertThat(quantityKpi.getTitle()).isEqualTo("Total Quantity");
+            assertThat((BigDecimal) quantityKpi.getKpiValue()).isEqualByComparingTo(new BigDecimal("3"));
+        }
+
+        @Test
+        @DisplayName("Fix 2: Case-insensitive category merging combines variants into dominant casing variant")
+        void caseInsensitiveCategoryMerging() {
+            List<String> headers = List.of("Category", "Sales");
+            List<Map<String, Object>> rows = List.of(
+                    Map.of("Category", "CLOTHING", "Sales", 100.0),
+                    Map.of("Category", "Clothing", "Sales", 200.0),
+                    Map.of("Category", "Clothing", "Sales", 150.0),
+                    Map.of("Category", " clothing ", "Sales", 50.0),
+                    Map.of("Category", "Electronics", "Sales", 500.0)
+            );
+            ExcelSheetData sheet = ExcelSheetData.builder()
+                    .sheetName("Products")
+                    .headers(headers)
+                    .rows(rows)
+                    .build();
+            ExcelWorkbookData wb = ExcelWorkbookData.builder()
+                    .fileName("products.xlsx")
+                    .sheets(List.of(sheet))
+                    .build();
+
+            Dashboard d = service.createDashboard("Merge Dash", "Products", wb);
+
+            DashboardWidget widget = DashboardWidget.builder()
+                    .type(WidgetType.BAR_CHART)
+                    .title("Sales by Category")
+                    .sheetName("Products")
+                    .chartConfig(ChartConfig.builder()
+                            .categoryColumn("Category")
+                            .valueColumn("Sales")
+                            .aggregation("SUM")
+                            .mergeSimilarCategories(true)
+                            .build())
+                    .build();
+
+            DashboardWidget added = service.addWidget(d.getDashboardId(), widget, wb);
+            List<ChartConfig.ChartDataPoint> points = added.getChartConfig().getDataPoints();
+
+            assertThat(points).hasSize(2);
+
+            ChartConfig.ChartDataPoint clothingPoint = points.stream()
+                    .filter(p -> "Clothing".equals(p.getLabel()))
+                    .findFirst()
+                    .orElse(null);
+
+            assertThat(clothingPoint).isNotNull();
+            // Dominant casing was "Clothing" (frequency 2 vs 1 each for CLOTHING and ' clothing ')
+            assertThat(clothingPoint.getLabel()).isEqualTo("Clothing");
+            assertThat(((Number) clothingPoint.getValue()).doubleValue()).isEqualTo(500.0);
+
+            ChartConfig.ChartDataPoint electPoint = points.stream()
+                    .filter(p -> "Electronics".equals(p.getLabel()))
+                    .findFirst()
+                    .orElse(null);
+            assertThat(electPoint).isNotNull();
+            assertThat(((Number) electPoint.getValue()).doubleValue()).isEqualTo(500.0);
+        }
+
+        @Test
+        @DisplayName("Fix 3: 15 categories produces top 10 categories + 1 'Other (5 categories)' bucket")
+        void top10CategoriesAndOtherBucket() {
+            List<String> headers = List.of("Category", "Amount");
+            List<Map<String, Object>> rows = new ArrayList<>();
+            // Cat01 through Cat15 with decreasing values
+            for (int i = 1; i <= 15; i++) {
+                rows.add(Map.of("Category", String.format("Cat%02d", i), "Amount", (double) (100 - i)));
+            }
+
+            ExcelSheetData sheet = ExcelSheetData.builder()
+                    .sheetName("CategoriesSheet")
+                    .headers(headers)
+                    .rows(rows)
+                    .build();
+            ExcelWorkbookData wb = ExcelWorkbookData.builder()
+                    .fileName("categories.xlsx")
+                    .sheets(List.of(sheet))
+                    .build();
+
+            Dashboard d = service.createDashboard("Cats Dash", "CategoriesSheet", wb);
+
+            DashboardWidget widget = DashboardWidget.builder()
+                    .type(WidgetType.BAR_CHART)
+                    .title("Top Categories")
+                    .sheetName("CategoriesSheet")
+                    .chartConfig(ChartConfig.builder()
+                            .categoryColumn("Category")
+                            .valueColumn("Amount")
+                            .aggregation("SUM")
+                            .build())
+                    .build();
+
+            DashboardWidget added = service.addWidget(d.getDashboardId(), widget, wb);
+            List<ChartConfig.ChartDataPoint> points = added.getChartConfig().getDataPoints();
+
+            // Total 11 points: 10 top points + 1 other bucket
+            assertThat(points).hasSize(11);
+
+            ChartConfig.ChartDataPoint otherPoint = points.get(10);
+            assertThat(otherPoint.getLabel()).isEqualTo("Other (5 categories)");
+
+            // Remainder is Cat11 (89) + Cat12 (88) + Cat13 (87) + Cat14 (86) + Cat15 (85) = 435.0
+            double expectedRemainderSum = 89 + 88 + 87 + 86 + 85;
+            assertThat(((Number) otherPoint.getValue()).doubleValue()).isEqualTo(expectedRemainderSum);
         }
     }
 }

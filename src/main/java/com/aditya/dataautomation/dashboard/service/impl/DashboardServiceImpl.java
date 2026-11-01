@@ -3,8 +3,8 @@ package com.aditya.dataautomation.dashboard.service.impl;
 import com.aditya.dataautomation.dashboard.exception.DashboardException;
 import com.aditya.dataautomation.dashboard.model.*;
 import com.aditya.dataautomation.dashboard.service.DashboardService;
-import com.aditya.dataautomation.model.excel.ExcelSheetData;
-import com.aditya.dataautomation.model.excel.ExcelWorkbookData;
+import com.aditya.dataautomation.excel.model.ExcelSheetData;
+import com.aditya.dataautomation.excel.model.ExcelWorkbookData;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
@@ -34,6 +34,8 @@ public class DashboardServiceImpl implements DashboardService {
     private static final Pattern METRIC_NAME_STRONG = Pattern.compile(".*(revenue|sales|profit|amount|total|cost|price|income|budget|spend|balance|turnover).*");
     private static final Pattern METRIC_NAME_MODERATE = Pattern.compile(".*(quantity|units|score|rating|discount|rate|weight|hours|count|target).*");
     private static final Pattern DIMENSION_NAME = Pattern.compile(".*(category|region|segment|status|country|city|state|product|department|brand|customer|channel|gender|type|tier).*");
+    private static final Pattern AVERAGE_METRIC_PATTERN = Pattern.compile(".*(price|rate|unitprice|average|avg|score|rating|percentage|percent).*");
+    private static final Pattern SUM_METRIC_PATTERN = Pattern.compile(".*(amount|total|quantity|units|revenue|sales|cost|count|sum).*");
 
     private static final DateTimeFormatter[] DATE_FORMATTERS = {
         DateTimeFormatter.ofPattern("yyyy/MM/dd", Locale.ENGLISH),
@@ -48,8 +50,32 @@ public class DashboardServiceImpl implements DashboardService {
         DateTimeFormatter.ofPattern("MMM yyyy", Locale.ENGLISH)
     };
 
-    // Keyed by dashboardId
+    // Keyed by dashboardId with bounded size and TTL to prevent memory leaks
+    private static final int MAX_DASHBOARDS = 200;
     private final Map<String, Dashboard> dashboards = new ConcurrentHashMap<>();
+
+    @org.springframework.scheduling.annotation.Scheduled(fixedRate = 3600000)
+    public void cleanupExpiredDashboards() {
+        LocalDateTime cutoff = LocalDateTime.now().minusHours(24);
+        dashboards.entrySet().removeIf(entry -> {
+            Dashboard d = entry.getValue();
+            return d.getCreatedAt() != null && d.getCreatedAt().isBefore(cutoff);
+        });
+    }
+
+    private void evictOldestIfFull() {
+        if (dashboards.size() >= MAX_DASHBOARDS) {
+            cleanupExpiredDashboards();
+            if (dashboards.size() >= MAX_DASHBOARDS) {
+                // If still full after TTL cleanup, remove oldest entry by createdAt
+                dashboards.entrySet().stream()
+                        .filter(e -> e.getValue().getCreatedAt() != null)
+                        .min(Comparator.comparing(e -> e.getValue().getCreatedAt()))
+                        .map(Map.Entry::getKey)
+                        .ifPresent(dashboards::remove);
+            }
+        }
+    }
 
     @Override
     public Dashboard createDashboard(Long userId, String fileId, String fileName, String name, String sheetName, ExcelWorkbookData workbook) {
@@ -58,6 +84,7 @@ public class DashboardServiceImpl implements DashboardService {
             throw new DashboardException("Dashboard name must not be empty");
         }
         resolveSheet(workbook, sheetName);
+        evictOldestIfFull();
 
         Dashboard dashboard = Dashboard.builder()
                 .dashboardId(UUID.randomUUID().toString())
@@ -183,10 +210,6 @@ public class DashboardServiceImpl implements DashboardService {
         return d;
     }
 
-    // ========================================================================
-    // Widget validation
-    // ========================================================================
-
     private void validateWidgetConfig(DashboardWidget widget, ExcelSheetData sheet) {
         switch (widget.getType()) {
             case KPI -> validateKpiWidget(widget, sheet);
@@ -247,10 +270,6 @@ public class DashboardServiceImpl implements DashboardService {
             validateNumericColumn(sheet, config.getValueColumn());
         }
     }
-
-    // ========================================================================
-    // Widget data computation
-    // ========================================================================
 
     private void computeWidgetData(DashboardWidget widget, ExcelSheetData sheet) {
         switch (widget.getType()) {
@@ -452,16 +471,33 @@ public class DashboardServiceImpl implements DashboardService {
         ChartConfig config = widget.getChartConfig();
         String catCol = sheet.resolveColumnName(config.getCategoryColumn());
         String valCol = sheet.resolveColumnName(config.getValueColumn());
-        String agg = config.getAggregation().toUpperCase();
+        String agg = config.getAggregation() != null ? config.getAggregation().toUpperCase() : "SUM";
         boolean isCount = "COUNT".equals(agg);
+        boolean mergeSimilar = Boolean.TRUE.equals(config.getMergeSimilarCategories());
 
         Map<Object, GroupAcc> groups = new LinkedHashMap<>();
+        Map<String, Map<String, Integer>> casingCounts = mergeSimilar ? new LinkedHashMap<>() : null;
         List<Map<String, Object>> rows = sheet.getRows() != null ? sheet.getRows() : Collections.emptyList();
 
         for (Map<String, Object> row : rows) {
             Object rawKey = row.get(catCol);
-            Object key = rawKey != null ? rawKey : "(Blank)";
-            GroupAcc acc = groups.computeIfAbsent(key, k -> new GroupAcc());
+            Object groupKey;
+            if (rawKey == null) {
+                groupKey = "(Blank)";
+            } else if (mergeSimilar) {
+                String rawStr = rawKey.toString().trim();
+                if (rawStr.isEmpty()) {
+                    rawStr = "(Blank)";
+                }
+                String norm = rawStr.toLowerCase();
+                groupKey = norm;
+                Map<String, Integer> counts = casingCounts.computeIfAbsent(norm, k -> new LinkedHashMap<>());
+                counts.put(rawStr, counts.getOrDefault(rawStr, 0) + 1);
+            } else {
+                groupKey = rawKey;
+            }
+
+            GroupAcc acc = groups.computeIfAbsent(groupKey, k -> new GroupAcc());
             if (isCount) {
                 acc.addCount();
             } else {
@@ -477,13 +513,30 @@ public class DashboardServiceImpl implements DashboardService {
 
         List<ChartConfig.ChartDataPoint> points = new ArrayList<>(groups.size());
         for (Map.Entry<Object, GroupAcc> entry : groups.entrySet()) {
+            Object displayLabel = entry.getKey();
+            if (mergeSimilar && casingCounts != null) {
+                Map<String, Integer> counts = casingCounts.get(entry.getKey());
+                if (counts != null && !counts.isEmpty()) {
+                    String dominant = null;
+                    int maxCount = -1;
+                    for (Map.Entry<String, Integer> variant : counts.entrySet()) {
+                        if (variant.getValue() > maxCount) {
+                            maxCount = variant.getValue();
+                            dominant = variant.getKey();
+                        }
+                    }
+                    if (dominant != null) {
+                        displayLabel = dominant;
+                    }
+                }
+            }
             points.add(ChartConfig.ChartDataPoint.builder()
-                    .label(entry.getKey())
+                    .label(displayLabel)
                     .value(entry.getValue().getResult(agg))
                     .build());
         }
 
-        // 1. Categorical charts: keep top 10 and aggregate remainder into "Others"
+        // 1. Categorical charts: keep top 10 and aggregate remainder into "Other (N categories)" bucket
         if (points.size() > 12 && (widget.getType() == WidgetType.BAR_CHART
                 || widget.getType() == WidgetType.PIE_CHART
                 || widget.getType() == WidgetType.DONUT_CHART)) {
@@ -494,20 +547,36 @@ public class DashboardServiceImpl implements DashboardService {
             });
             List<ChartConfig.ChartDataPoint> top10 = new ArrayList<>(points.subList(0, 10));
             List<ChartConfig.ChartDataPoint> remainder = points.subList(10, points.size());
-            double otherTotal = 0.0;
+
+            double sumOthers = 0.0;
             long countOthers = 0;
+            Double minOthers = null;
+            Double maxOthers = null;
+
             for (ChartConfig.ChartDataPoint p : remainder) {
                 if (p.getValue() instanceof Number n) {
-                    otherTotal += n.doubleValue();
+                    double d = n.doubleValue();
+                    sumOthers += d;
                     countOthers++;
+                    if (minOthers == null || d < minOthers) minOthers = d;
+                    if (maxOthers == null || d > maxOthers) maxOthers = d;
                 }
             }
+
             if (countOthers > 0) {
-                Object otherVal = "AVERAGE".equalsIgnoreCase(agg)
-                        ? Math.round((otherTotal / countOthers) * 100.0) / 100.0
-                        : Math.round(otherTotal * 100.0) / 100.0;
+                Object otherVal;
+                if ("AVERAGE".equalsIgnoreCase(agg)) {
+                    otherVal = Math.round((sumOthers / countOthers) * 100.0) / 100.0;
+                } else if ("MIN".equalsIgnoreCase(agg)) {
+                    otherVal = minOthers != null ? Math.round(minOthers * 100.0) / 100.0 : 0.0;
+                } else if ("MAX".equalsIgnoreCase(agg)) {
+                    otherVal = maxOthers != null ? Math.round(maxOthers * 100.0) / 100.0 : 0.0;
+                } else {
+                    otherVal = Math.round(sumOthers * 100.0) / 100.0;
+                }
+
                 top10.add(ChartConfig.ChartDataPoint.builder()
-                        .label("Other Categories (" + remainder.size() + ")")
+                        .label("Other (" + remainder.size() + " categories)")
                         .value(otherVal)
                         .build());
             }
@@ -644,10 +713,6 @@ public class DashboardServiceImpl implements DashboardService {
         return sampled;
     }
 
-    // ========================================================================
-    // Helpers
-    // ========================================================================
-
     private void validateWorkbook(ExcelWorkbookData workbook) {
         if (workbook == null) {
             throw new DashboardException("No workbook loaded. Upload an Excel file first.");
@@ -701,10 +766,6 @@ public class DashboardServiceImpl implements DashboardService {
                 + "Cannot perform numeric aggregation.");
     }
 
-    // ========================================================================
-    // Automatic Power BI Dashboard Generator
-    // ========================================================================
-
     @Override
     public Dashboard autoGenerateDashboard(Long userId, String fileId, String fileName, String name, String sheetName, ExcelWorkbookData workbook) {
         validateWorkbook(workbook);
@@ -745,7 +806,6 @@ public class DashboardServiceImpl implements DashboardService {
         ColumnProfile secondaryMetric = numericCols.size() > 1 ? numericCols.get(1) : null;
         ColumnProfile tertiaryMetric = numericCols.size() > 2 ? numericCols.get(2) : null;
 
-        // KPI 1: Total Records
         addWidgetQuietly(dashboard, DashboardWidget.builder()
                 .type(WidgetType.KPI)
                 .title("Total Records")
@@ -753,27 +813,29 @@ public class DashboardServiceImpl implements DashboardService {
                 .aggregation("COUNT")
                 .build(), sheet);
 
-        // KPI 2: Primary Metric Total
         if (primaryMetric != null) {
-            String title = formatKpiTitle("Total", primaryMetric.name);
+            String agg = determineDefaultAggregation(primaryMetric.name);
+            String prefix = "AVERAGE".equalsIgnoreCase(agg) ? "Average" : "Total";
+            String title = formatKpiTitle(prefix, primaryMetric.name);
             addWidgetQuietly(dashboard, DashboardWidget.builder()
                     .type(WidgetType.KPI)
                     .title(title)
                     .sheetName(sheetName)
                     .columnName(primaryMetric.name)
-                    .aggregation("SUM")
+                    .aggregation(agg)
                     .build(), sheet);
         }
 
-        // KPI 3: Secondary Metric Total or Primary Average
         if (secondaryMetric != null) {
-            String title = formatKpiTitle("Total", secondaryMetric.name);
+            String agg = determineDefaultAggregation(secondaryMetric.name);
+            String prefix = "AVERAGE".equalsIgnoreCase(agg) ? "Average" : "Total";
+            String title = formatKpiTitle(prefix, secondaryMetric.name);
             addWidgetQuietly(dashboard, DashboardWidget.builder()
                     .type(WidgetType.KPI)
                     .title(title)
                     .sheetName(sheetName)
                     .columnName(secondaryMetric.name)
-                    .aggregation("SUM")
+                    .aggregation(agg)
                     .build(), sheet);
         } else if (primaryMetric != null && sheet.getRowCount() > 1) {
             String title = formatKpiTitle("Average", primaryMetric.name);
@@ -786,15 +848,16 @@ public class DashboardServiceImpl implements DashboardService {
                     .build(), sheet);
         }
 
-        // KPI 4: Tertiary Metric or Secondary Average
         if (tertiaryMetric != null) {
-            String title = formatKpiTitle("Total", tertiaryMetric.name);
+            String agg = determineDefaultAggregation(tertiaryMetric.name);
+            String prefix = "AVERAGE".equalsIgnoreCase(agg) ? "Average" : "Total";
+            String title = formatKpiTitle(prefix, tertiaryMetric.name);
             addWidgetQuietly(dashboard, DashboardWidget.builder()
                     .type(WidgetType.KPI)
                     .title(title)
                     .sheetName(sheetName)
                     .columnName(tertiaryMetric.name)
-                    .aggregation("SUM")
+                    .aggregation(agg)
                     .build(), sheet);
         } else if (secondaryMetric != null && sheet.getRowCount() > 1) {
             String title = formatKpiTitle("Average", secondaryMetric.name);
@@ -807,10 +870,8 @@ public class DashboardServiceImpl implements DashboardService {
                     .build(), sheet);
         }
 
-        // Charts
         Set<String> usedChartSignatures = new HashSet<>();
 
-        // Chart A: Time Series (Area or Line)
         if (!dateCols.isEmpty() && primaryMetric != null) {
             ColumnProfile dateCol = dateCols.get(0);
             String sig = "TIME:" + dateCol.name + ":" + primaryMetric.name;
@@ -827,7 +888,6 @@ public class DashboardServiceImpl implements DashboardService {
                     .build(), sheet);
         }
 
-        // Chart B: Primary Categorical Breakdown (Bar Chart)
         ColumnProfile primaryCat = null;
         for (ColumnProfile cat : categoricalCols) {
             if (cat.distinctCount >= 2 && cat.distinctCount <= 30) {
@@ -848,12 +908,12 @@ public class DashboardServiceImpl implements DashboardService {
                                 .categoryColumn(primaryCat.name)
                                 .valueColumn(valCol)
                                 .aggregation(agg)
+                                .mergeSimilarCategories(true)
                                 .build())
                         .build(), sheet);
             }
         }
 
-        // Chart C: Distribution (Donut Chart)
         ColumnProfile lowCardCat = null;
         for (ColumnProfile cat : categoricalCols) {
             if (cat != primaryCat && cat.distinctCount >= 2 && cat.distinctCount <= 8) {
@@ -874,12 +934,12 @@ public class DashboardServiceImpl implements DashboardService {
                                 .categoryColumn(lowCardCat.name)
                                 .valueColumn(valCol)
                                 .aggregation(agg)
+                                .mergeSimilarCategories(true)
                                 .build())
                         .build(), sheet);
             }
         }
 
-        // Chart D: Secondary Comparison / Top Categories
         ColumnProfile secondaryCat = null;
         for (ColumnProfile cat : categoricalCols) {
             if (cat != primaryCat && cat != lowCardCat && cat.distinctCount >= 2 && cat.distinctCount <= 40) {
@@ -900,12 +960,12 @@ public class DashboardServiceImpl implements DashboardService {
                                 .categoryColumn(secondaryCat.name)
                                 .valueColumn(valCol)
                                 .aggregation(agg)
+                                .mergeSimilarCategories(true)
                                 .build())
                         .build(), sheet);
             }
         }
 
-        // 3. Detailed Data Records Table
         List<String> tableCols = new ArrayList<>();
         if (primaryCat != null) tableCols.add(primaryCat.name);
         if (!dateCols.isEmpty() && !tableCols.contains(dateCols.get(0).name)) tableCols.add(dateCols.get(0).name);
@@ -980,7 +1040,6 @@ public class DashboardServiceImpl implements DashboardService {
 
             cp.distinctCount = distinctSample.size();
 
-            // Check if column is ID-like
             cp.isIdLike = ID_COLUMN_PATTERN.matcher(lower).matches()
                     || (cp.distinctCount == sampleSize && sampleSize > 10 && lower.contains("id"));
 
@@ -1095,5 +1154,19 @@ public class DashboardServiceImpl implements DashboardService {
             return clean;
         }
         return prefix + " " + clean;
+    }
+
+    private String determineDefaultAggregation(String columnName) {
+        if (columnName == null || columnName.isBlank()) {
+            return "SUM";
+        }
+        String clean = columnName.trim().toLowerCase();
+        if (AVERAGE_METRIC_PATTERN.matcher(clean).matches()) {
+            return "AVERAGE";
+        }
+        if (SUM_METRIC_PATTERN.matcher(clean).matches()) {
+            return "SUM";
+        }
+        return "SUM";
     }
 }

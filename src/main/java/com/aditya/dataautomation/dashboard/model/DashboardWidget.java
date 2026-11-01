@@ -32,8 +32,6 @@ public class DashboardWidget {
     /** Sheet this widget draws data from */
     private String sheetName;
 
-    // ---- KPI configuration ----
-
     /** Column for KPI computation */
     private String columnName;
 
@@ -55,15 +53,11 @@ public class DashboardWidget {
     /** Operational threshold alert status: "SUCCESS", "WARNING", "NORMAL" */
     private String alertStatus;
 
-    // ---- TABLE configuration ----
-
     /** Columns to include in the table widget */
     private List<String> columns;
 
     /** Computed table rows */
     private List<Map<String, Object>> tableData;
-
-    // ---- CHART configuration ----
 
     /** Chart config for BAR_CHART, LINE_CHART, PIE_CHART */
     private ChartConfig chartConfig;

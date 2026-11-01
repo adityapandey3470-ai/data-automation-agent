@@ -1,9 +1,9 @@
 import React from 'react';
 import {
   Upload, FileSpreadsheet, Sparkles, LineChart, Download,
-  ArrowRight, Check, Sliders, Table2
+  ArrowRight, Sliders, Table2
 } from '../icons/Icons';
-import { formatMetricNumber, formatExactNumber } from '../../utils/numberFormat';
+import { formatMetricNumber } from '../../utils/numberFormat';
 
 export default function DashboardPage({ loaded, fileInfo, activeSheet, onNavigate, currentUser, onRequestAuth }) {
   const totalRows = loaded
@@ -32,7 +32,6 @@ export default function DashboardPage({ loaded, fileInfo, activeSheet, onNavigat
         </div>
       </div>
 
-      {/* Stats Grid */}
       <div className="stats-grid mb-24">
         <div className="stat-card">
           <div className="stat-label">Active Workbook</div>
@@ -62,7 +61,6 @@ export default function DashboardPage({ loaded, fileInfo, activeSheet, onNavigat
         </div>
       </div>
 
-      {/* Dataset Details or Empty State */}
       {!loaded ? (
         <div className="card empty-hero-card mb-24">
           <div className="empty-state">
@@ -122,7 +120,6 @@ export default function DashboardPage({ loaded, fileInfo, activeSheet, onNavigat
         </div>
       )}
 
-      {/* Quick Action Matrix */}
       <div className="card">
         <div className="card-header">
           <h3 className="card-title">Engine Quick Actions</h3>

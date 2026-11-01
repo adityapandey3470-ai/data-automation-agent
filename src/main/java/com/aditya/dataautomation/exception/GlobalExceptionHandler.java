@@ -1,6 +1,7 @@
 package com.aditya.dataautomation.exception;
 
 import com.aditya.dataautomation.dto.ErrorResponse;
+import com.aditya.dataautomation.excel.exception.InvalidExcelFileException;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
@@ -147,7 +148,6 @@ public class GlobalExceptionHandler {
     }
 
 
-    // ---- Dashboard errors ----
     @ExceptionHandler(com.aditya.dataautomation.dashboard.exception.DashboardException.class)
     public ResponseEntity<ErrorResponse> handleDashboardException(
             com.aditya.dataautomation.dashboard.exception.DashboardException ex,
@@ -164,7 +164,6 @@ public class GlobalExceptionHandler {
         return ResponseEntity.badRequest().body(response);
     }
 
-    // ---- Export errors ----
     @ExceptionHandler(com.aditya.dataautomation.export.exception.ExportException.class)
     public ResponseEntity<ErrorResponse> handleExportException(
             com.aditya.dataautomation.export.exception.ExportException ex,
@@ -213,7 +212,27 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.FORBIDDEN).body(response);
     }
 
-    // ---- Catch-all for unexpected errors ----
+    @ExceptionHandler({
+            org.springframework.dao.OptimisticLockingFailureException.class,
+            jakarta.persistence.OptimisticLockException.class
+    })
+    public ResponseEntity<ErrorResponse> handleOptimisticLockException(
+            Exception ex,
+            HttpServletRequest request) {
+
+        log.warn("Optimistic lock conflict at {}: {}", request.getRequestURI(), ex.getMessage());
+
+        ErrorResponse response = ErrorResponse.builder()
+                .status(HttpStatus.CONFLICT.value())
+                .error("Conflict")
+                .message("The resource was modified concurrently by another operation. Please refresh and retry.")
+                .path(request.getRequestURI())
+                .timestamp(LocalDateTime.now())
+                .build();
+
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(response);
+    }
+
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ErrorResponse> handleGenericException(
             Exception ex,
