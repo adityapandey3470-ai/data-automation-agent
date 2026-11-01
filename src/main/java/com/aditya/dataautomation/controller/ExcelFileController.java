@@ -34,7 +34,7 @@ public class ExcelFileController {
             summary = "Upload and analyze an Excel file",
             description = "Accepts an .xlsx file and returns file metadata, sheet information, "
                     + "column headers, and a limited preview of data rows. "
-                    + "The workbook is also stored in memory for subsequent analysis operations."
+                    + "The workbook is registered in the user's workspace."
     )
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "File processed successfully",
@@ -46,11 +46,28 @@ public class ExcelFileController {
             @Parameter(description = "The .xlsx file to upload", required = true)
             @RequestPart("file") MultipartFile file) {
 
-        ExcelFileResponse response = excelFileService.processExcelFile(file);
-
-
+        ExcelFileResponse parsedResponse = excelFileService.processExcelFile(file);
         ExcelWorkbookData workbookData = excelFileService.parseWorkbook(file);
-        workbookSessionHolder.store(workbookData);
+        String fileName = file.getOriginalFilename() != null ? file.getOriginalFilename() : "Workbook";
+
+        String fileId = workbookSessionHolder.registerNewWorkbook(workbookData, fileName, file.getSize(), "Upload: " + fileName);
+
+        int totalRows = 0;
+        if (parsedResponse.getSheets() != null) {
+            for (var s : parsedResponse.getSheets()) {
+                totalRows += s.getRowCount();
+            }
+        }
+
+        ExcelFileResponse response = ExcelFileResponse.builder()
+                .fileId(fileId)
+                .fileName(fileName)
+                .fileSize(file.getSize())
+                .contentType(parsedResponse.getContentType())
+                .sheetCount(parsedResponse.getSheetCount())
+                .totalRows(totalRows)
+                .sheets(parsedResponse.getSheets())
+                .build();
 
         return ResponseEntity.ok(response);
     }

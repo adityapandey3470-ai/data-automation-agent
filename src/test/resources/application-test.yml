@@ -35,3 +35,8 @@ app:
     max-size: 10485760
   excel:
     preview-rows: 10
+  jwt:
+    secret: test-environment-hmac-sha256-secret-key-for-testing-only-1234567890!
+    expiration-hours: 72
+  auth:
+    expose-dev-token: true

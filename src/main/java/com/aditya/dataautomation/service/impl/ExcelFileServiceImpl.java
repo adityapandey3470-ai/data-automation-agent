@@ -1,12 +1,16 @@
 package com.aditya.dataautomation.service.impl;
 
+import com.aditya.dataautomation.config.properties.ExcelProperties;
+import com.aditya.dataautomation.config.properties.FileProperties;
 import com.aditya.dataautomation.dto.excel.ExcelFileResponse;
 import com.aditya.dataautomation.dto.excel.ExcelSheetResponse;
 import com.aditya.dataautomation.exception.InvalidExcelFileException;
 import com.aditya.dataautomation.model.excel.ExcelSheetData;
 import com.aditya.dataautomation.model.excel.ExcelWorkbookData;
 import com.aditya.dataautomation.service.ExcelFileService;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.poi.openxml4j.util.ZipSecureFile;
 import org.apache.poi.ss.usermodel.Cell;
 import org.apache.poi.ss.usermodel.CellType;
 import org.apache.poi.ss.usermodel.DateUtil;
@@ -14,7 +18,6 @@ import org.apache.poi.ss.usermodel.Row;
 import org.apache.poi.ss.usermodel.Sheet;
 import org.apache.poi.ss.usermodel.Workbook;
 import org.apache.poi.ss.usermodel.WorkbookFactory;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -30,7 +33,12 @@ import java.util.Map;
 
 @Slf4j
 @Service
+@RequiredArgsConstructor
 public class ExcelFileServiceImpl implements ExcelFileService {
+
+    static {
+        ZipSecureFile.setMinInflateRatio(0.01);
+    }
 
     private static final String XLSX_CONTENT_TYPE =
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
@@ -38,15 +46,8 @@ public class ExcelFileServiceImpl implements ExcelFileService {
     private static final DateTimeFormatter DATE_FORMATTER =
             DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
-    private final long maxFileSize;
-    private final int previewRowLimit;
-
-    public ExcelFileServiceImpl(
-            @Value("${app.file.max-size}") long maxFileSize,
-            @Value("${app.excel.preview-rows}") int previewRowLimit) {
-        this.maxFileSize = maxFileSize;
-        this.previewRowLimit = previewRowLimit;
-    }
+    private final FileProperties fileProperties;
+    private final ExcelProperties excelProperties;
 
     @Override
     public ExcelFileResponse processExcelFile(MultipartFile file) {
@@ -169,6 +170,7 @@ public class ExcelFileServiceImpl implements ExcelFileService {
             throw new InvalidExcelFileException("No file provided or file is empty");
         }
 
+        long maxFileSize = fileProperties.getMaxSize();
         if (file.getSize() > maxFileSize) {
             throw new InvalidExcelFileException(
                     "File size exceeds the maximum allowed limit of " + (maxFileSize / (1024 * 1024)) + " MB");
@@ -180,6 +182,11 @@ public class ExcelFileServiceImpl implements ExcelFileService {
                     "Only .xlsx files are supported. Received: " + originalFilename);
         }
 
+        // Defend against path traversal and null byte injections in file names
+        if (originalFilename.contains("..") || originalFilename.contains("/") || originalFilename.contains("\\") || originalFilename.contains("\0")) {
+            throw new InvalidExcelFileException("Invalid file name. Path traversal characters are not permitted.");
+        }
+
         String contentType = file.getContentType();
 
         if (contentType != null
@@ -187,6 +194,16 @@ public class ExcelFileServiceImpl implements ExcelFileService {
                 && !contentType.equals("application/octet-stream")) {
             throw new InvalidExcelFileException(
                     "Unsupported content type: " + contentType + ". Expected an .xlsx file.");
+        }
+
+        // Magic bytes validation: Verify ZIP signature (0x50, 0x4B = PK) for OOXML (.xlsx)
+        try (InputStream is = file.getInputStream()) {
+            byte[] header = is.readNBytes(4);
+            if (header.length < 4 || header[0] != 0x50 || header[1] != 0x4B) {
+                throw new InvalidExcelFileException("The uploaded file does not have a valid .xlsx archive signature.");
+            }
+        } catch (IOException e) {
+            throw new InvalidExcelFileException("Failed to verify file integrity.", e);
         }
     }
 
@@ -258,7 +275,8 @@ public class ExcelFileServiceImpl implements ExcelFileService {
         int headerRowIndex = headerRow.getRowNum();
         int rowsCollected = 0;
 
-        for (int i = headerRowIndex + 1; i <= sheet.getLastRowNum() && rowsCollected < previewRowLimit; i++) {
+        int previewLimit = excelProperties.getPreviewRows();
+        for (int i = headerRowIndex + 1; i <= sheet.getLastRowNum() && rowsCollected < previewLimit; i++) {
             Row row = sheet.getRow(i);
             if (row == null || isRowBlank(row)) {
                 continue;

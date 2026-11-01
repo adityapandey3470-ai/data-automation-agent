@@ -4,16 +4,16 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
-
-import java.time.LocalDateTime;
+import lombok.NoArgsConstructor;
 
 @Getter
 @Builder
+@NoArgsConstructor
 @AllArgsConstructor
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public class HealthResponse {
 
-    private final String status;
-    private final String service;
-    private final LocalDateTime timestamp;
+    private String status;
+    private String service;
+    private String timestamp;
 }

@@ -4,7 +4,7 @@ import com.aditya.dataautomation.dto.HealthResponse;
 import com.aditya.dataautomation.service.HealthService;
 import org.springframework.stereotype.Service;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 
 @Service
 public class HealthServiceImpl implements HealthService {
@@ -16,7 +16,7 @@ public class HealthServiceImpl implements HealthService {
         return HealthResponse.builder()
                 .status("UP")
                 .service(SERVICE_NAME)
-                .timestamp(LocalDateTime.now())
+                .timestamp(Instant.now().toString())
                 .build();
     }
 }

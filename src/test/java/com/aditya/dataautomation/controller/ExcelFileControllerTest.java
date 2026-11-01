@@ -17,6 +17,8 @@ import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMock
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.mock.web.MockMultipartFile;
+import org.springframework.security.test.context.support.WithAnonymousUser;
+import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
@@ -35,6 +37,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @SpringBootTest
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
+@WithMockUser(username = "testuser", roles = {"USER"})
 class ExcelFileControllerTest {
 
     private static final String UPLOAD_URL = "/api/v1/files/excel";
@@ -422,6 +425,19 @@ class ExcelFileControllerTest {
                     .andExpect(status().isBadRequest())
                     .andExpect(jsonPath("$.message").value(
                             org.hamcrest.Matchers.containsString("Unsupported content type")));
+        }
+
+        @Test
+        @WithAnonymousUser
+        @DisplayName("Security: Should strictly reject unauthenticated file uploads with 401")
+        void shouldRejectUnauthenticatedUpload() throws Exception {
+            byte[] bytes = createSimpleExcel("Sales", new String[]{"A"}, new Object[][]{{1}});
+            MockMultipartFile file = new MockMultipartFile("file", "sales.xlsx", XLSX_CONTENT_TYPE, bytes);
+
+            mockMvc.perform(multipart(UPLOAD_URL).file(file))
+                    .andExpect(status().isUnauthorized())
+                    .andExpect(jsonPath("$.status").value(401))
+                    .andExpect(jsonPath("$.error").value("Unauthorized"));
         }
 
         @Test

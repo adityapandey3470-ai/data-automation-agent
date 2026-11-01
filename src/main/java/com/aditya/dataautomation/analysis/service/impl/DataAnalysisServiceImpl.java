@@ -135,6 +135,44 @@ public class DataAnalysisServiceImpl implements DataAnalysisService {
     }
 
 
+    private static class GroupAccumulator {
+        int count = 0;
+        BigDecimal sum = BigDecimal.ZERO;
+        long numCount = 0;
+        BigDecimal min = null;
+        BigDecimal max = null;
+
+        void addCount() {
+            count++;
+        }
+
+        void addValue(BigDecimal val) {
+            count++;
+            if (val != null) {
+                numCount++;
+                sum = sum.add(val);
+                if (min == null || val.compareTo(min) < 0) min = val;
+                if (max == null || val.compareTo(max) > 0) max = val;
+            }
+        }
+
+        Object getAggregationValue(AggregationFunction fn) {
+            if (fn == AggregationFunction.COUNT) {
+                return (long) count;
+            }
+            if (numCount == 0) {
+                return BigDecimal.ZERO;
+            }
+            return switch (fn) {
+                case SUM -> sum;
+                case AVERAGE -> sum.divide(BigDecimal.valueOf(numCount), 4, RoundingMode.HALF_UP);
+                case MIN -> min;
+                case MAX -> max;
+                case COUNT -> (long) count;
+            };
+        }
+    }
+
     @Override
     public GroupResult groupBy(ExcelSheetData sheet, String groupByColumn,
                                String aggregationColumn, AggregationFunction aggregation) {
@@ -147,21 +185,30 @@ public class DataAnalysisServiceImpl implements DataAnalysisService {
             resolvedAgg = sheet.resolveColumnName(aggregationColumn);
         }
 
-        // Group rows by the key column
-        Map<Object, List<Map<String, Object>>> groups = new LinkedHashMap<>();
-        for (Map<String, Object> row : sheet.getRows()) {
-            Object key = row.get(resolvedGroup);
-            groups.computeIfAbsent(key, k -> new ArrayList<>()).add(row);
+        // Single-pass running accumulator: O(N) time and O(K) memory
+        Map<Object, GroupAccumulator> groups = new LinkedHashMap<>();
+        boolean isCount = (aggregation == AggregationFunction.COUNT);
+        List<Map<String, Object>> rows = sheet.getRows() != null ? sheet.getRows() : Collections.emptyList();
+
+        for (Map<String, Object> row : rows) {
+            Object rawKey = row.get(resolvedGroup);
+            Object key = rawKey != null ? rawKey : "(Blank)";
+            GroupAccumulator acc = groups.computeIfAbsent(key, k -> new GroupAccumulator());
+            if (isCount) {
+                acc.addCount();
+            } else {
+                Object val = row.get(resolvedAgg);
+                acc.addValue(toBigDecimal(val));
+            }
         }
 
-        List<GroupResult.GroupEntry> entries = new ArrayList<>();
-        for (Map.Entry<Object, List<Map<String, Object>>> entry : groups.entrySet()) {
-            List<Map<String, Object>> groupRows = entry.getValue();
-            Object aggValue = calculateAggregation(groupRows, resolvedAgg, aggregation);
+        List<GroupResult.GroupEntry> entries = new ArrayList<>(groups.size());
+        for (Map.Entry<Object, GroupAccumulator> entry : groups.entrySet()) {
+            GroupAccumulator acc = entry.getValue();
             entries.add(GroupResult.GroupEntry.builder()
                     .key(entry.getKey())
-                    .count(groupRows.size())
-                    .aggregationValue(aggValue)
+                    .count(acc.count)
+                    .aggregationValue(acc.getAggregationValue(aggregation))
                     .build());
         }
 
@@ -197,10 +244,17 @@ public class DataAnalysisServiceImpl implements DataAnalysisService {
 
         // Build a fingerprint for each row based on selected columns
         Map<String, List<Map<String, Object>>> fingerprints = new LinkedHashMap<>();
+        StringBuilder sb = new StringBuilder(128);
         for (Map<String, Object> row : sheet.getRows()) {
-            String key = resolved.stream()
-                    .map(col -> String.valueOf(row.get(col)))
-                    .collect(Collectors.joining("|"));
+            sb.setLength(0);
+            for (int i = 0; i < resolved.size(); i++) {
+                if (i > 0) sb.append('|');
+                Object val = row.get(resolved.get(i));
+                if (val != null) {
+                    sb.append(val);
+                }
+            }
+            String key = sb.toString();
             fingerprints.computeIfAbsent(key, k -> new ArrayList<>()).add(row);
         }
 
@@ -411,11 +465,21 @@ public class DataAnalysisServiceImpl implements DataAnalysisService {
     }
 
     private BigDecimal toBigDecimal(Object value) {
+        if (value == null) return null;
         if (value instanceof BigDecimal bd) return bd;
         if (value instanceof Long l) return BigDecimal.valueOf(l);
         if (value instanceof Integer i) return BigDecimal.valueOf(i);
         if (value instanceof Double d) return BigDecimal.valueOf(d);
-        return new BigDecimal(value.toString());
+        if (value instanceof Float f) return BigDecimal.valueOf(f.doubleValue());
+        if (value instanceof Short s) return BigDecimal.valueOf(s);
+        if (value instanceof Byte b) return BigDecimal.valueOf(b);
+        String s = value.toString().trim();
+        if (s.isEmpty()) return null;
+        try {
+            return new BigDecimal(s.replace(",", ""));
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     private boolean isDateString(String s) {
@@ -469,33 +533,7 @@ public class DataAnalysisServiceImpl implements DataAnalysisService {
     }
 
 
-    private Object calculateAggregation(List<Map<String, Object>> rows, String column,
-                                        AggregationFunction function) {
-        if (function == AggregationFunction.COUNT) {
-            return (long) rows.size();
-        }
 
-        List<BigDecimal> numericValues = rows.stream()
-                .map(row -> row.get(column))
-                .filter(v -> v instanceof Number)
-                .map(this::toBigDecimal)
-                .toList();
-
-        if (numericValues.isEmpty()) {
-            return BigDecimal.ZERO;
-        }
-
-        return switch (function) {
-            case SUM -> numericValues.stream().reduce(BigDecimal.ZERO, BigDecimal::add);
-            case AVERAGE -> {
-                BigDecimal total = numericValues.stream().reduce(BigDecimal.ZERO, BigDecimal::add);
-                yield total.divide(BigDecimal.valueOf(numericValues.size()), 4, RoundingMode.HALF_UP);
-            }
-            case MIN -> numericValues.stream().min(Comparator.naturalOrder()).orElse(null);
-            case MAX -> numericValues.stream().max(Comparator.naturalOrder()).orElse(null);
-            case COUNT -> (long) rows.size();
-        };
-    }
 
 
     private String detectColumnType(List<Object> nonNullValues) {
