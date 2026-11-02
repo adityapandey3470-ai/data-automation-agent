@@ -75,6 +75,9 @@ springdoc:
 
 
 app:
+  security:
+    behind-proxy: ${APP_BEHIND_PROXY:false}
+    trusted-proxies: ${APP_TRUSTED_PROXIES:127.0.0.1,::1}
   file:
     max-size: 10485760
   excel:

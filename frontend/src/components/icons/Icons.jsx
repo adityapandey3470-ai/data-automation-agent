@@ -35,10 +35,8 @@ export const LogoMark = ({ size = 24, className = '', variant = 'auto' }) => {
         </linearGradient>
       </defs>
 
-      {/* Base squircle container with deep emerald -> mint gradient */}
       <rect width="32" height="32" rx="8" fill={`url(#${gradId})`} />
       
-      {/* Subtle inner highlight border for a glassmorphism/metal SaaS finish */}
       <rect
         x="0.75"
         y="0.75"
@@ -49,21 +47,16 @@ export const LogoMark = ({ size = 24, className = '', variant = 'auto' }) => {
         strokeWidth="1.5"
       />
       
-      {/* Tabular Grid Cells (The "Refinery" matrix flanking the T) */}
       <rect x="5.5" y="13.5" width="6" height="5" rx="1.75" fill="white" fillOpacity={isLight ? 0.55 : 0.45} />
       <rect x="20.5" y="13.5" width="6" height="5" rx="1.75" fill="white" fillOpacity={isLight ? 0.55 : 0.45} />
       
-      {/* Row 3 side cells (raw input tiers) */}
       <rect x="5.5" y="20.5" width="6" height="5" rx="1.75" fill="white" fillOpacity={isLight ? 0.3 : 0.22} />
       <rect x="20.5" y="20.5" width="6" height="5" rx="1.75" fill="white" fillOpacity={isLight ? 0.3 : 0.22} />
       
-      {/* The Core 'T' — Tabular Header Crossbar */}
       <rect x="5.5" y="6.5" width="21" height="5.25" rx="2" fill="#FFFFFF" />
       
-      {/* The Core 'T' — Central Refined Column Stem */}
       <rect x="13" y="10" width="6" height="15.5" rx="2" fill="#FFFFFF" />
       
-      {/* Inner AI Sparkle inside the central refinery stem */}
       <path
         d="M16 14.2L16.7 16.2L18.7 17L16.7 17.8L16 19.8L15.3 17.8L13.3 17L15.3 16.2Z"
         fill={isLight ? "#047857" : "#059669"}
@@ -162,6 +155,12 @@ export const ChevronRight = ({ size = 16, className = '' }) => (
   </svg>
 );
 
+export const ChevronDown = ({ size = 16, className = '' }) => (
+  <svg width={size} height={size} {...iconProps} className={className}>
+    <path d="m6 9 6 6 6-6" />
+  </svg>
+);
+
 export const Search = ({ size = 16, className = '' }) => (
   <svg width={size} height={size} {...iconProps} className={className}>
     <circle cx="11" cy="11" r="8" />
@@ -210,6 +209,20 @@ export const AlertCircle = ({ size = 16, className = '' }) => (
     <circle cx="12" cy="12" r="10" />
     <line x1="12" x2="12" y1="8" y2="12" />
     <line x1="12" x2="12.01" y1="16" y2="16" />
+  </svg>
+);
+
+export const Bug = ({ size = 16, className = '' }) => (
+  <svg width={size} height={size} {...iconProps} className={className}>
+    <rect width="8" height="14" x="8" y="6" rx="4" />
+    <path d="m19 7-3 2" />
+    <path d="m5 7 3 2" />
+    <path d="m19 19-3-2" />
+    <path d="m5 19 3-2" />
+    <path d="M20 13h-4" />
+    <path d="M4 13h4" />
+    <path d="m10 4 1 2" />
+    <path d="m14 4-1 2" />
   </svg>
 );
 
@@ -456,6 +469,77 @@ export const Calendar = ({ size = 16, className = '' }) => (
     <line x1="16" x2="16" y1="2" y2="6" />
     <line x1="8" x2="8" y1="2" y2="6" />
     <line x1="3" x2="21" y1="10" y2="10" />
+  </svg>
+);
+
+export const ShieldCheck = ({ size = 18, className = '' }) => (
+  <svg width={size} height={size} {...iconProps} className={className}>
+    <path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z" />
+    <path d="m9 12 2 2 4-4" />
+  </svg>
+);
+
+export const Clock = ({ size = 16, className = '' }) => (
+  <svg width={size} height={size} {...iconProps} className={className}>
+    <circle cx="12" cy="12" r="10" />
+    <polyline points="12 6 12 12 16 14" />
+  </svg>
+);
+
+export const Palette = ({ size = 18, className = '' }) => (
+  <svg width={size} height={size} {...iconProps} className={className}>
+    <circle cx="13.5" cy="6.5" r=".5" fill="currentColor" />
+    <circle cx="17.5" cy="10.5" r=".5" fill="currentColor" />
+    <circle cx="8.5" cy="7.5" r=".5" fill="currentColor" />
+    <circle cx="6.5" cy="12.5" r=".5" fill="currentColor" />
+    <path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.563-2.512 5.563-5.563C22 6.5 17.5 2 12 2z" />
+  </svg>
+);
+
+export const MoveUp = ({ size = 16, className = '' }) => (
+  <svg width={size} height={size} {...iconProps} className={className}>
+    <path d="m5 12 7-7 7 7" />
+    <path d="M12 19V5" />
+  </svg>
+);
+
+export const MoveDown = ({ size = 16, className = '' }) => (
+  <svg width={size} height={size} {...iconProps} className={className}>
+    <path d="m19 12-7 7-7-7" />
+    <path d="M12 5v14" />
+  </svg>
+);
+
+export const RotateCcw = ({ size = 16, className = '' }) => (
+  <svg width={size} height={size} {...iconProps} className={className}>
+    <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+    <path d="M3 3v5h5" />
+  </svg>
+);
+
+export const Pipette = ({ size = 16, className = '' }) => (
+  <svg width={size} height={size} {...iconProps} className={className}>
+    <path d="m14 2-8.5 8.5a2.12 2.12 0 1 0 3 3L17 5" />
+    <path d="m16 4 2 2" />
+    <path d="m19 1 4 4" />
+    <path d="m2 22 5-5" />
+    <path d="M2 22v-3l3-3" />
+  </svg>
+);
+
+export const Type = ({ size = 16, className = '' }) => (
+  <svg width={size} height={size} {...iconProps} className={className}>
+    <polyline points="4 7 4 4 20 4 20 7" />
+    <line x1="9" x2="15" y1="20" y2="20" />
+    <line x1="12" x2="12" y1="4" y2="20" />
+  </svg>
+);
+
+export const Target = ({ size = 16, className = '' }) => (
+  <svg width={size} height={size} {...iconProps} className={className}>
+    <circle cx="12" cy="12" r="10" />
+    <circle cx="12" cy="12" r="6" />
+    <circle cx="12" cy="12" r="2" />
   </svg>
 );
 

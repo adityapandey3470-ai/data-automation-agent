@@ -1,14 +1,16 @@
 import React, { useState } from 'react';
 import {
-  Sliders, HelpCircle, Shield, FileText, Mail,
+  Sliders, HelpCircle, Shield, FileText, Mail, Bug,
   Check, ArrowRight, RefreshCw, FileSpreadsheet, Sparkles, BarChart3, Download
 } from '../icons/Icons';
+import BugReportForm from '../support/BugReportForm';
 
-export default function SettingsPage({ onReplayOnboarding }) {
+export default function SettingsPage({ onReplayOnboarding, currentUser }) {
   const [activeTab, setActiveTab] = useState('general');
 
   const navItems = [
     { id: 'general', label: 'General & Preferences', icon: <Sliders size={16} /> },
+    { id: 'bug-report', label: 'Report a Bug', icon: <Bug size={16} /> },
     { id: 'guide', label: 'How to Use Tabufinery', icon: <HelpCircle size={16} /> },
     { id: 'privacy', label: 'Privacy Policy', icon: <Shield size={16} /> },
     { id: 'terms', label: 'Terms & Conditions', icon: <FileText size={16} /> },
@@ -71,6 +73,12 @@ export default function SettingsPage({ onReplayOnboarding }) {
                 </div>
                 <span className="badge badge-info">v0.1.0-production-beta</span>
               </div>
+            </div>
+          )}
+
+          {activeTab === 'bug-report' && (
+            <div className="settings-bug-report-wrap">
+              <BugReportForm currentUser={currentUser} onCancel={() => setActiveTab('general')} />
             </div>
           )}
 
@@ -239,9 +247,14 @@ export default function SettingsPage({ onReplayOnboarding }) {
                   <p className="support-desc">
                     For inquiries, bug reports, feature requests, or technical guidance, our engineering team responds promptly.
                   </p>
-                  <a href="mailto:support0912@gmail.com?subject=Tabufinery%20Support%20Request" className="btn btn-primary btn-sm mt-12">
-                    <Mail size={14} /> Contact Support
-                  </a>
+                  <div className="flex items-center gap-10 mt-12 flex-wrap">
+                    <button className="btn btn-primary btn-sm" onClick={() => setActiveTab('bug-report')}>
+                      <Bug size={14} /> Report a Bug
+                    </button>
+                    <a href="mailto:support0912@gmail.com?subject=Tabufinery%20Support%20Request" className="btn btn-outline btn-sm">
+                      <Mail size={14} /> Email Support
+                    </a>
+                  </div>
                 </div>
               </div>
 

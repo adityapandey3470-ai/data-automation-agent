@@ -29,7 +29,6 @@ export default function Sidebar({ activePage, onNavigate, isMobileOpen, onClose,
 
   return (
     <>
-      {/* Mobile Drawer Backdrop */}
       <div
         className={`sidebar-backdrop ${isMobileOpen ? 'active' : ''}`}
         onClick={onClose}

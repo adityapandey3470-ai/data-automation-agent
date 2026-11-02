@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { getHealth } from '../../services/api';
-import { Search, FileSpreadsheet, Menu, Folder, User, LogOut, Shield } from '../icons/Icons';
+import { Search, FileSpreadsheet, Menu, Folder, User, LogOut, Shield, ChevronDown, Sliders } from '../icons/Icons';
 
 export default function TopNav({
   title,
@@ -106,7 +106,7 @@ export default function TopNav({
               }}
             >
               <FileSpreadsheet size={13} className="text-emerald" style={{ flexShrink: 0 }} />
-              <span style={{ fontWeight: 600, maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{fileName}</span>
+              <span className="topnav-file-name">{fileName}</span>
               {workspaceFiles.length > 1 && (
                 <span className="badge badge-neutral" style={{ fontSize: 10, padding: '1px 5px', marginLeft: 4 }}>
                   {workspaceFiles.length} files ▾
@@ -173,15 +173,14 @@ export default function TopNav({
 
       <div className="topnav-spacer" />
 
-      {/* Projects Trigger */}
       <button
-        className="btn btn-xs btn-outline mr-8 flex-gap"
+        className="btn btn-xs btn-outline mr-8 flex-gap topnav-projects-btn"
         onClick={onOpenProjects}
         title="View and Manage Saved Projects"
-        style={{ height: 32, padding: '0 10px', fontSize: 12 }}
+        style={{ height: 32, padding: '0 8px', fontSize: 12, flexShrink: 0 }}
       >
         <Folder size={13} className="text-emerald" />
-        <span>Projects</span>
+        <span className="topnav-projects-label">Projects</span>
       </button>
 
       <div className="topnav-search">
@@ -201,31 +200,47 @@ export default function TopNav({
         <span>{backendHealth === 'up' ? (loaded ? 'Engine Connected · Active Session' : 'Engine Ready') : 'API Offline'}</span>
       </div>
 
-      {/* User Auth Section */}
       {currentUser ? (
         <div ref={dropdownRef} style={{ position: 'relative' }}>
-          <div
-            className="topnav-avatar"
-            style={{ cursor: 'pointer', background: 'var(--accent-color, #3b82f6)' }}
-            title={`${currentUser.name} (${currentUser.email})`}
+          <button
+            type="button"
+            className={`topnav-user-pill ${userDropdownOpen ? 'active' : ''}`}
             onClick={() => setUserDropdownOpen(prev => !prev)}
+            aria-expanded={userDropdownOpen}
+            aria-haspopup="true"
+            title={`${currentUser.name} (${currentUser.email})`}
           >
-            {getInitials(currentUser.name)}
-          </div>
+            <div className="topnav-user-avatar">
+              <span>{getInitials(currentUser.name)}</span>
+              <span className="topnav-user-status-dot" />
+            </div>
+            <div className="topnav-user-info-text">
+              <span className="topnav-user-name">{currentUser.name?.split(' ')[0] || 'Account'}</span>
+              {currentUser.role === 'ROLE_ADMIN' && (
+                <span className="topnav-user-role-badge">Admin</span>
+              )}
+            </div>
+            <ChevronDown size={13} className={`topnav-user-chevron ${userDropdownOpen ? 'open' : ''}`} />
+          </button>
 
           {userDropdownOpen && (
             <div className="user-dropdown-menu">
               <div className="user-dropdown-header">
-                <div className="user-dropdown-name">
-                  <span>{currentUser.name}</span>
-                  {currentUser.role === 'ROLE_ADMIN' && (
-                    <span className="admin-badge" style={{ fontSize: 9, padding: '1px 5px', textTransform: 'uppercase' }}>
-                      Admin
-                    </span>
-                  )}
+                <div className="user-dropdown-avatar-large">
+                  <span>{getInitials(currentUser.name)}</span>
                 </div>
-                <div className="user-dropdown-email">
-                  {currentUser.email}
+                <div className="user-dropdown-meta">
+                  <div className="user-dropdown-name">
+                    <span>{currentUser.name}</span>
+                    {currentUser.role === 'ROLE_ADMIN' ? (
+                      <span className="admin-badge">Admin</span>
+                    ) : (
+                      <span className="member-badge">Member</span>
+                    )}
+                  </div>
+                  <div className="user-dropdown-email" title={currentUser.email}>
+                    {currentUser.email}
+                  </div>
                 </div>
               </div>
 
@@ -233,18 +248,20 @@ export default function TopNav({
 
               {currentUser.role === 'ROLE_ADMIN' && (
                 <button
+                  type="button"
                   className="user-dropdown-item"
                   onClick={() => {
                     setUserDropdownOpen(false);
                     if (onNavigate) onNavigate('admin');
                   }}
-                  style={{ color: '#10b981' }}
+                  style={{ color: 'var(--emerald, #10b981)' }}
                 >
                   <Shield size={14} /> <span>Admin Console</span>
                 </button>
               )}
 
               <button
+                type="button"
                 className="user-dropdown-item"
                 onClick={() => {
                   setUserDropdownOpen(false);
@@ -254,9 +271,21 @@ export default function TopNav({
                 <Folder size={14} className="text-emerald" /> <span>Saved Projects</span>
               </button>
 
+              <button
+                type="button"
+                className="user-dropdown-item"
+                onClick={() => {
+                  setUserDropdownOpen(false);
+                  if (onNavigate) onNavigate('settings');
+                }}
+              >
+                <Sliders size={14} /> <span>Settings</span>
+              </button>
+
               <div className="user-dropdown-divider" />
 
               <button
+                type="button"
                 className="user-dropdown-item danger"
                 onClick={() => {
                   setUserDropdownOpen(false);

@@ -13,6 +13,7 @@ import SplashScreen from './components/launch/SplashScreen';
 import OnboardingModal from './components/launch/OnboardingModal';
 import AuthModal from './components/auth/AuthModal';
 import SavedProjectsModal from './components/workspace/SavedProjectsModal';
+import ErrorBoundary from './components/shared/ErrorBoundary';
 import { getWorkbookStatus, selectWorkspaceFile, deleteWorkspaceFile, getStoredUser, clearStoredAuth } from './services/api';
 
 const VALID_PAGES = ['overview', 'workspace', 'assistant', 'analytics', 'export', 'admin', 'settings'];
@@ -40,12 +41,10 @@ export default function App() {
   const [activeSheet, setActiveSheet] = useState(null);
   const [refreshKey, setRefreshKey] = useState(0);
 
-  // User Auth & Projects State
   const [currentUser, setCurrentUser] = useState(() => getStoredUser());
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [showProjectsModal, setShowProjectsModal] = useState(false);
 
-  // Mobile drawer state
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
   // Splash & Onboarding states: only run splash once per browser session (never on page refresh)
@@ -63,7 +62,6 @@ export default function App() {
     }
   }, []);
 
-  // Synchronize active page with URL hash and localStorage
   useEffect(() => {
     if (typeof window !== 'undefined') {
       localStorage.setItem('tabufinery_active_page', page);
@@ -74,7 +72,6 @@ export default function App() {
     }
   }, [page]);
 
-  // Handle browser back/forward and hash changes
   useEffect(() => {
     const handleHashChange = () => {
       const hash = window.location.hash.replace(/^#\/?/, '').split('?')[0].split('/')[0];
@@ -90,7 +87,6 @@ export default function App() {
     return () => window.removeEventListener('hashchange', handleHashChange);
   }, [currentUser]);
 
-  // Automatic System Theme State
   const [currentTheme, setCurrentTheme] = useState(() => {
     if (typeof window !== 'undefined' && window.matchMedia) {
       return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
@@ -116,7 +112,6 @@ export default function App() {
     return () => window.removeEventListener('tabufinery_unauthorized', handleUnauthorized);
   }, []);
 
-  // Automatic System-Based Dark / Light Theme Sync
   useEffect(() => {
     const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
     const updateTheme = (e) => {
@@ -125,12 +120,10 @@ export default function App() {
       setCurrentTheme(active);
     };
 
-    // Apply immediate system theme
     const active = mediaQuery.matches ? 'dark' : 'light';
     document.documentElement.setAttribute('data-theme', active);
     setCurrentTheme(active);
 
-    // Listen for real-time OS theme toggle
     if (mediaQuery.addEventListener) {
       mediaQuery.addEventListener('change', updateTheme);
       return () => mediaQuery.removeEventListener('change', updateTheme);
@@ -140,7 +133,6 @@ export default function App() {
     }
   }, []);
 
-  // Check if onboarding was previously completed
   useEffect(() => {
     const onboarded = localStorage.getItem('tabufinery_onboarded') || localStorage.getItem('datapilot_onboarded');
     if (!onboarded) {
@@ -148,14 +140,12 @@ export default function App() {
     }
   }, []);
 
-  // Redirect non-admin away from admin page if they lose admin privilege or log out
   useEffect(() => {
     if (page === 'admin' && currentUser?.role !== 'ROLE_ADMIN') {
       setPage('overview');
     }
   }, [currentUser, page]);
 
-  // Check if a workbook is already loaded in the backend session (only if authenticated)
   useEffect(() => {
     if (!currentUser) {
       setFileInfo(null);
@@ -196,7 +186,6 @@ export default function App() {
           setActiveSheet(null);
         }
       } catch (err) {
-        // Backend idle or no active workbook loaded yet
       }
     };
     fetchStatus();
@@ -294,7 +283,6 @@ export default function App() {
       {showSplash && <SplashScreen onFinish={() => setShowSplash(false)} theme={currentTheme} />}
       <OnboardingModal isOpen={!showSplash && showOnboarding} onClose={() => setShowOnboarding(false)} />
 
-      {/* Authentication Modal: Opens on user operation or manual Sign In */}
       <AuthModal
         isOpen={showAuthModal}
         forced={false}
@@ -302,7 +290,6 @@ export default function App() {
         onAuthSuccess={handleAuthSuccess}
       />
 
-      {/* Saved Projects Modal */}
       <SavedProjectsModal
         isOpen={showProjectsModal}
         onClose={() => setShowProjectsModal(false)}
@@ -347,81 +334,85 @@ export default function App() {
           />
 
           <div className="page-content">
-            {page === 'overview' && (
-              <DashboardPage
-                loaded={loaded}
-                fileInfo={fileInfo}
-                activeSheet={activeSheet}
-                onNavigate={navigate}
-                currentUser={currentUser}
-                onRequestAuth={() => setShowAuthModal(true)}
-              />
-            )}
-            {page === 'workspace' && (
-              <DataWorkspace
-                fileInfo={fileInfo}
-                activeSheet={activeSheet}
-                setActiveSheet={handleSelectSheet}
-                workspaceFiles={workspaceFiles}
-                onSelectFile={handleSelectFile}
-                onDeleteFile={handleDeleteFile}
-                onUploadSuccess={onUploadSuccess}
-                onRefresh={onRefresh}
-                refreshKey={refreshKey}
-                onOpenProjects={() => {
-                  if (!currentUser) {
-                    setShowAuthModal(true);
-                  } else {
-                    setShowProjectsModal(true);
-                  }
-                }}
-                currentUser={currentUser}
-                onRequestAuth={() => setShowAuthModal(true)}
-              />
-            )}
-            {page === 'assistant' && (
-              <AIAssistant
-                sheetName={sheetName}
-                loaded={loaded}
-                onRefresh={onRefresh}
-                onNavigate={navigate}
-                currentUser={currentUser}
-                onRequestAuth={() => setShowAuthModal(true)}
-              />
-            )}
-            {page === 'analytics' && (
-              <AnalyticsPage
-                sheetName={sheetName}
-                sheets={fileInfo?.sheets}
-                onSelectSheet={handleSelectSheet}
-                headers={headers}
-                loaded={loaded}
-                onNavigate={navigate}
-                currentUser={currentUser}
-                onRequestAuth={() => setShowAuthModal(true)}
-              />
-            )}
-            {page === 'export' && (
-              <ExportPage
-                sheetName={sheetName}
-                sheets={fileInfo?.sheets}
-                loaded={loaded}
-                onNavigate={navigate}
-                currentUser={currentUser}
-                onRequestAuth={() => setShowAuthModal(true)}
-              />
-            )}
-            {page === 'admin' && currentUser?.role === 'ROLE_ADMIN' && (
-              <AdminPage currentUser={currentUser} />
-            )}
-            {page === 'settings' && (
-              <SettingsPage onReplayOnboarding={() => setShowOnboarding(true)} />
-            )}
+            <ErrorBoundary key={page}>
+              {page === 'overview' && (
+                <DashboardPage
+                  loaded={loaded}
+                  fileInfo={fileInfo}
+                  activeSheet={activeSheet}
+                  onNavigate={navigate}
+                  currentUser={currentUser}
+                  onRequestAuth={() => setShowAuthModal(true)}
+                />
+              )}
+              {page === 'workspace' && (
+                <DataWorkspace
+                  fileInfo={fileInfo}
+                  activeSheet={activeSheet}
+                  setActiveSheet={handleSelectSheet}
+                  workspaceFiles={workspaceFiles}
+                  onSelectFile={handleSelectFile}
+                  onDeleteFile={handleDeleteFile}
+                  onUploadSuccess={onUploadSuccess}
+                  onRefresh={onRefresh}
+                  refreshKey={refreshKey}
+                  onOpenProjects={() => {
+                    if (!currentUser) {
+                      setShowAuthModal(true);
+                    } else {
+                      setShowProjectsModal(true);
+                    }
+                  }}
+                  currentUser={currentUser}
+                  onRequestAuth={() => setShowAuthModal(true)}
+                />
+              )}
+              {page === 'assistant' && (
+                <AIAssistant
+                  sheetName={sheetName}
+                  loaded={loaded}
+                  onRefresh={onRefresh}
+                  onNavigate={navigate}
+                  currentUser={currentUser}
+                  onRequestAuth={() => setShowAuthModal(true)}
+                />
+              )}
+              {page === 'analytics' && (
+                <AnalyticsPage
+                  sheetName={sheetName}
+                  sheets={fileInfo?.sheets}
+                  onSelectSheet={handleSelectSheet}
+                  headers={headers}
+                  loaded={loaded}
+                  onNavigate={navigate}
+                  currentUser={currentUser}
+                  onRequestAuth={() => setShowAuthModal(true)}
+                />
+              )}
+              {page === 'export' && (
+                <ExportPage
+                  sheetName={sheetName}
+                  sheets={fileInfo?.sheets}
+                  loaded={loaded}
+                  onNavigate={navigate}
+                  currentUser={currentUser}
+                  onRequestAuth={() => setShowAuthModal(true)}
+                />
+              )}
+              {page === 'admin' && currentUser?.role === 'ROLE_ADMIN' && (
+                <AdminPage currentUser={currentUser} />
+              )}
+              {page === 'settings' && (
+                <SettingsPage
+                  onReplayOnboarding={() => setShowOnboarding(true)}
+                  currentUser={currentUser}
+                />
+              )}
+            </ErrorBoundary>
           </div>
         </div>
       </div>
 
-      {/* Floating AI Support Chatbot Widget */}
       <SupportChatWidget currentUser={currentUser} onRequestAuth={() => setShowAuthModal(true)} />
     </>
   );

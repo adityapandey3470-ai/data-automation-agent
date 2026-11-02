@@ -75,7 +75,6 @@ export const getErrorMessage = (err, fallback = 'An unexpected error occurred. P
   return fallback;
 };
 
-// ---- Auth Storage Helpers ----
 export const getStoredToken = () => localStorage.getItem('tabufinery_token');
 export const setStoredAuth = (token, user) => {
   if (token) localStorage.setItem('tabufinery_token', token);
@@ -94,10 +93,8 @@ export const clearStoredAuth = () => {
   localStorage.removeItem('tabufinery_user');
 };
 
-// ---- Health ----
 export const getHealth = () => api.get('/health');
 
-// ---- Authentication ----
 export const signupUser = (name, email, password, confirmPassword) =>
   api.post('/auth/signup', { name, email, password, confirmPassword });
 
@@ -112,7 +109,6 @@ export const resetPassword = (token, newPassword, confirmPassword) =>
 
 export const getCurrentUser = () => api.get('/auth/me');
 
-// ---- Admin Management ----
 export const getAdminUsers = (page = 0, size = 50) =>
   api.get('/admin/users', { params: { page, size } });
 export const getAdminStats = () => api.get('/admin/stats');
@@ -121,7 +117,6 @@ export const updateAdminUserStatus = (id, enabled) =>
 export const updateAdminUserRole = (id, role) =>
   api.patch(`/admin/users/${id}/role`, { role });
 
-// ---- Saved Projects (Persistence) ----
 export const saveProject = (name, description, activeSheetName, projectId = null) =>
   api.post('/projects/save', { name, description, activeSheetName, projectId });
 
@@ -136,7 +131,6 @@ export const renameProject = (id, name) =>
 
 export const deleteProject = (id) => api.delete(`/projects/${id}`);
 
-// ---- File Upload ----
 export const uploadExcel = (file) => {
   const form = new FormData();
   form.append('file', file);
@@ -145,7 +139,6 @@ export const uploadExcel = (file) => {
   });
 };
 
-// ---- Workbook & Multi-File Workspace ----
 export const getWorkbookStatus = () => api.get('/workbook/status');
 export const getWorkspaceFiles = () => api.get('/workbook/files');
 export const selectWorkspaceFile = (fileId) => api.post(`/workbook/files/${fileId}/select`);
@@ -155,7 +148,6 @@ export const getPreview = (sheetName, limit = 50) =>
 export const getAllData = (sheetName) =>
   api.get('/workbook/data', { params: { sheetName } });
 
-// ---- Analysis ----
 export const getStatistics = (sheetName, column) =>
   api.post('/analysis/statistics', { sheetName, column });
 
@@ -171,7 +163,6 @@ export const groupBy = (sheetName, groupByColumn, aggregationColumn, aggregation
 export const findDuplicates = (sheetName, columns) =>
   api.post('/analysis/duplicates', { sheetName, columns });
 
-// ---- Cleaning ----
 export const removeDuplicates = (req) => api.post('/cleaning/duplicates', req);
 export const handleMissing = (req) => api.post('/cleaning/missing-values', req);
 export const cleanStrings = (req) => api.post('/cleaning/strings', req);
@@ -183,12 +174,10 @@ export const transformPipeline = (reqs) => api.post('/cleaning/transform', reqs)
 export const previewCleaning = (req) => api.post('/cleaning/preview', req);
 export const previewPipeline = (reqs) => api.post('/cleaning/preview-pipeline', reqs);
 
-// ---- Workbook Undo / Redo ----
 export const undoWorkbook = () => api.post('/workbook/undo');
 export const redoWorkbook = () => api.post('/workbook/redo');
 export const getWorkbookHistory = () => api.get('/workbook/history');
 
-// ---- Dashboard ----
 export const createDashboard = (name, sheetName) =>
   api.post('/dashboard/create', { name, sheetName });
 
@@ -209,7 +198,15 @@ export const listDashboards = () =>
 export const deleteDashboard = (dashboardId) =>
   api.delete(`/dashboard/${dashboardId}`);
 
-// ---- Export ----
+export const getDashboardPreferences = () =>
+  api.get('/dashboard/preferences');
+
+export const saveDashboardPreferences = (preferences) =>
+  api.put('/dashboard/preferences', preferences);
+
+export const resetDashboardPreferences = () =>
+  api.post('/dashboard/preferences/reset');
+
 export const exportExcel = (sheetName) =>
   api.get('/export/excel', {
     params: sheetName ? { sheetName } : {},
@@ -228,19 +225,53 @@ export const exportPdfReport = (sheetName) =>
     responseType: 'blob'
   });
 
-// ---- AI Analyst & Automatic Insights ----
 export const getAiStatus = () => api.get('/ai/status');
 export const getDataProfile = (sheetName) =>
   api.get('/ai/profile', { params: sheetName ? { sheetName } : {} });
 export const askAiAnalyst = (question, sheetName) =>
   api.post('/ai/ask', { question, sheetName });
 
-// ---- AI Support Chatbot & Helpdesk ----
 export const sendSupportMessage = (message, history = []) =>
   api.post('/support/chat', { message, history });
 
 export const submitSupportTicket = (category, subject, message) =>
   api.post('/support/ticket', { category, subject, message });
 
+export const submitBugReport = (data) =>
+  api.post('/support/bug-report', data);
+
 export const getSupportQuickQuestions = () =>
   api.get('/support/quick-questions');
+
+export const getAdminTickets = () =>
+  api.get('/admin/tickets');
+
+export const updateAdminTicketStatus = (id, status) =>
+  api.patch(`/admin/tickets/${id}/status`, { status });
+
+export const getAdminFiles = () =>
+  api.get('/admin/files');
+
+export const deleteAdminFile = (fileId) =>
+  api.delete(`/admin/files/${fileId}`);
+
+export const getAdminAuditLogs = () =>
+  api.get('/admin/audit-logs');
+
+export const submitExcelAsync = (file) => {
+  const form = new FormData();
+  form.append('file', file);
+  return api.post('/jobs/excel-async', form, {
+    headers: { 'Content-Type': 'multipart/form-data' }
+  });
+};
+
+export const getJobStatus = (jobId) =>
+  api.get(`/jobs/${jobId}`);
+
+export const cancelJob = (jobId) =>
+  api.post(`/jobs/${jobId}/cancel`);
+
+export const listRecentJobs = () =>
+  api.get('/jobs');
+
