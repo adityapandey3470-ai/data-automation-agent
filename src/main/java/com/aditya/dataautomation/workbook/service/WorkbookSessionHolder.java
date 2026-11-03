@@ -33,9 +33,9 @@ import java.util.*;
 @RequiredArgsConstructor
 public class WorkbookSessionHolder {
 
-    private static final int MAX_HISTORY = 10; // Bounded to 10 snapshots to prevent database JSON and heap bloat
+    private static final int MAX_HISTORY = 10;
     private static final int MAX_WORKBOOKS_PER_USER = 20;
-    private static final long SESSION_TTL_MILLIS = 2 * 60 * 60 * 1000L; // 2 hours
+    private static final long SESSION_TTL_MILLIS = 2 * 60 * 60 * 1000L;
 
     private final WorkingSessionRepository workingSessionRepository;
     private final UserRepository userRepository;
@@ -98,7 +98,7 @@ public class WorkbookSessionHolder {
             return userRepository.findByEmailIgnoreCase(ud.getUsername())
                     .map(User::getId)
                     .orElseGet(() -> {
-                        // Provision test/mock user on demand if authenticated in security context
+
                         User testUser = User.builder()
                                 .email(ud.getUsername().toLowerCase())
                                 .name(ud.getUsername())

@@ -17,6 +17,10 @@ public class AdminUserDto {
     private String email;
     private String role;
     private boolean enabled;
+    private String subscriptionTier;
+    private int aiQueriesUsed;
+    private int aiQueriesLimit;
+    private long totalTokensUsed;
     private int projectCount;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;

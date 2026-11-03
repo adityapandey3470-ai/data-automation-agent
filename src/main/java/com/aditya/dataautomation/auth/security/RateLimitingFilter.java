@@ -42,7 +42,6 @@ public class RateLimitingFilter extends OncePerRequestFilter {
 
         RateLimiterService.RateLimitResult res;
 
-        // 1. Login rate limit: max 15 requests / 60s per IP
         if ("POST".equalsIgnoreCase(method) && path.equals("/api/v1/auth/login")) {
             res = rateLimiterService.tryAcquireWithResult("login:" + clientIp, 15, 60);
             if (!res.allowed()) {
@@ -51,7 +50,6 @@ public class RateLimitingFilter extends OncePerRequestFilter {
             }
         }
 
-        // 2. Signup rate limit: max 10 requests / 300s per IP
         if ("POST".equalsIgnoreCase(method) && path.equals("/api/v1/auth/signup")) {
             res = rateLimiterService.tryAcquireWithResult("signup:" + clientIp, 10, 300);
             if (!res.allowed()) {
@@ -60,7 +58,6 @@ public class RateLimitingFilter extends OncePerRequestFilter {
             }
         }
 
-        // 3. Password reset request limit: max 5 requests / 300s per IP
         if ("POST".equalsIgnoreCase(method) && path.equals("/api/v1/auth/forgot-password")) {
             res = rateLimiterService.tryAcquireWithResult("forgot:" + clientIp, 5, 300);
             if (!res.allowed()) {
@@ -69,7 +66,6 @@ public class RateLimitingFilter extends OncePerRequestFilter {
             }
         }
 
-        // 4. Reset token submission limit: max 10 requests / 300s per IP
         if ("POST".equalsIgnoreCase(method) && path.equals("/api/v1/auth/reset-password")) {
             res = rateLimiterService.tryAcquireWithResult("reset:" + clientIp, 10, 300);
             if (!res.allowed()) {
@@ -78,7 +74,6 @@ public class RateLimitingFilter extends OncePerRequestFilter {
             }
         }
 
-        // 5. Expensive AI endpoints: max 30 requests / 60s per IP
         if (path.startsWith("/api/v1/ai/")) {
             res = rateLimiterService.tryAcquireWithResult("ai:" + clientIp, 30, 60);
             if (!res.allowed()) {
@@ -87,7 +82,6 @@ public class RateLimitingFilter extends OncePerRequestFilter {
             }
         }
 
-        // 6. File upload limit: max 20 uploads / 60s per IP
         if ("POST".equalsIgnoreCase(method) && (path.startsWith("/api/v1/files/") || path.startsWith("/api/v1/jobs/"))) {
             res = rateLimiterService.tryAcquireWithResult("upload:" + clientIp, 20, 60);
             if (!res.allowed()) {
@@ -96,7 +90,6 @@ public class RateLimitingFilter extends OncePerRequestFilter {
             }
         }
 
-        // 7. Data export limit: max 25 exports / 60s per IP
         if (path.startsWith("/api/v1/export/")) {
             res = rateLimiterService.tryAcquireWithResult("export:" + clientIp, 25, 60);
             if (!res.allowed()) {
@@ -111,7 +104,6 @@ public class RateLimitingFilter extends OncePerRequestFilter {
     private String extractClientIp(HttpServletRequest request) {
         String remoteAddr = request.getRemoteAddr() != null ? request.getRemoteAddr() : "unknown";
 
-        // Never trust client-supplied forwarded headers unless explicitly configured behind a trusted proxy
         if (!behindProxy) {
             return remoteAddr;
         }

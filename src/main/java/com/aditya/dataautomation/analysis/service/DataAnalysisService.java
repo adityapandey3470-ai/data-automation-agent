@@ -9,8 +9,6 @@ import java.util.Set;
 
 public interface DataAnalysisService {
 
-
-
     int countRows(ExcelSheetData sheet);
 
     long countNonEmpty(ExcelSheetData sheet, String column);
@@ -18,8 +16,6 @@ public interface DataAnalysisService {
     long countNulls(ExcelSheetData sheet, String column);
 
     Set<Object> distinctValues(ExcelSheetData sheet, String column);
-
-
 
     Object sum(ExcelSheetData sheet, String column);
 
@@ -29,26 +25,16 @@ public interface DataAnalysisService {
 
     Object max(ExcelSheetData sheet, String column);
 
-
-
     List<Map<String, Object>> filter(ExcelSheetData sheet, List<FilterCondition> conditions);
 
-
-
     List<Map<String, Object>> sort(ExcelSheetData sheet, List<SortCondition> sortConditions);
-
-
 
     GroupResult groupBy(ExcelSheetData sheet, String groupByColumn,
                         String aggregationColumn, AggregationFunction aggregation);
 
-
-
     List<Map<String, Object>> findDuplicateRows(ExcelSheetData sheet);
 
     List<Map<String, Object>> findDuplicatesByColumns(ExcelSheetData sheet, List<String> columns);
-
-
 
     ColumnStatistics getColumnStatistics(ExcelSheetData sheet, String column);
 }

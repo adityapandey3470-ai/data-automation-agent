@@ -34,7 +34,6 @@ public class ExcelSheetData {
         return headers != null ? headers.size() : 0;
     }
 
-
     public boolean hasColumn(String columnName) {
         if (columnName == null || headers == null) {
             return false;

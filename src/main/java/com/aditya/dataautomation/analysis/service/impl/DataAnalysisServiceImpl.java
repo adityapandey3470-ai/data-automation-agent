@@ -59,7 +59,6 @@ public class DataAnalysisServiceImpl implements DataAnalysisService {
                 .collect(Collectors.toCollection(LinkedHashSet::new));
     }
 
-
     @Override
     public Object sum(ExcelSheetData sheet, String column) {
         List<BigDecimal> values = extractNumericValues(sheet, column);
@@ -97,15 +96,12 @@ public class DataAnalysisServiceImpl implements DataAnalysisService {
         return values.stream().max(Comparator.naturalOrder()).orElse(null);
     }
 
-
-
     @Override
     public List<Map<String, Object>> filter(ExcelSheetData sheet, List<FilterCondition> conditions) {
         validateSheet(sheet);
         if (conditions == null || conditions.isEmpty()) {
             return new ArrayList<>(sheet.getRows());
         }
-
 
         for (FilterCondition condition : conditions) {
             validateColumn(sheet, condition.getColumn());
@@ -115,8 +111,6 @@ public class DataAnalysisServiceImpl implements DataAnalysisService {
                 .filter(row -> conditions.stream().allMatch(c -> matchesCondition(row, c, sheet)))
                 .collect(Collectors.toList());
     }
-
-
 
     @Override
     public List<Map<String, Object>> sort(ExcelSheetData sheet, List<SortCondition> sortConditions) {
@@ -134,7 +128,6 @@ public class DataAnalysisServiceImpl implements DataAnalysisService {
         result.sort(comparator);
         return result;
     }
-
 
     private static class GroupAccumulator {
         int count = 0;
@@ -186,7 +179,6 @@ public class DataAnalysisServiceImpl implements DataAnalysisService {
             resolvedAgg = sheet.resolveColumnName(aggregationColumn);
         }
 
-        // Single-pass running accumulator: O(N) time and O(K) memory
         Map<Object, GroupAccumulator> groups = new LinkedHashMap<>();
         boolean isCount = (aggregation == AggregationFunction.COUNT);
         List<Map<String, Object>> rows = sheet.getRows() != null ? sheet.getRows() : Collections.emptyList();
@@ -221,8 +213,6 @@ public class DataAnalysisServiceImpl implements DataAnalysisService {
                 .build();
     }
 
-
-
     @Override
     public List<Map<String, Object>> findDuplicateRows(ExcelSheetData sheet) {
         validateSheet(sheet);
@@ -254,7 +244,6 @@ public class DataAnalysisServiceImpl implements DataAnalysisService {
                 .flatMap(List::stream)
                 .collect(Collectors.toList());
     }
-
 
     @Override
     public ColumnStatistics getColumnStatistics(ExcelSheetData sheet, String column) {
@@ -322,12 +311,11 @@ public class DataAnalysisServiceImpl implements DataAnalysisService {
                         .toList();
                 builder.topValues(topValues);
             }
-            default -> { /* BOOLEAN or UNKNOWN — just basic counts */ }
+            default -> {  }
         }
 
         return builder.build();
     }
-
 
     private void validateSheet(ExcelSheetData sheet) {
         if (sheet == null) {
@@ -434,7 +422,6 @@ public class DataAnalysisServiceImpl implements DataAnalysisService {
         return null;
     }
 
-
     private boolean matchesCondition(Map<String, Object> row, FilterCondition condition,
                                      ExcelSheetData sheet) {
         String resolved = sheet.resolveColumnName(condition.getColumn());
@@ -475,11 +462,9 @@ public class DataAnalysisServiceImpl implements DataAnalysisService {
         if (cellValue == null) return -1;
         if (filterValue == null) return 1;
 
-
         if (cellValue instanceof Number && filterValue instanceof Number) {
             return toBigDecimal(cellValue).compareTo(toBigDecimal(filterValue));
         }
-
 
         if (cellValue instanceof Number && filterValue instanceof String fs) {
             try {
@@ -489,11 +474,9 @@ public class DataAnalysisServiceImpl implements DataAnalysisService {
             }
         }
 
-
         if (isDateString(cellValue.toString()) && isDateString(filterValue.toString())) {
             return cellValue.toString().compareTo(filterValue.toString());
         }
-
 
         return cellValue.toString().compareToIgnoreCase(filterValue.toString());
     }
@@ -536,7 +519,6 @@ public class DataAnalysisServiceImpl implements DataAnalysisService {
         }
     }
 
-
     private Comparator<Map<String, Object>> buildComparator(List<SortCondition> conditions,
                                                              ExcelSheetData sheet) {
         Comparator<Map<String, Object>> comparator = null;
@@ -559,10 +541,9 @@ public class DataAnalysisServiceImpl implements DataAnalysisService {
         return comparator;
     }
 
-
     private int compareForSort(Object a, Object b) {
         if (a == null && b == null) return 0;
-        if (a == null) return 1;   // nulls last
+        if (a == null) return 1;
         if (b == null) return -1;
 
         if (a instanceof Number && b instanceof Number) {
@@ -571,10 +552,6 @@ public class DataAnalysisServiceImpl implements DataAnalysisService {
 
         return a.toString().compareToIgnoreCase(b.toString());
     }
-
-
-
-
 
     private String detectColumnType(List<Object> nonNullValues) {
         if (nonNullValues.isEmpty()) return "UNKNOWN";

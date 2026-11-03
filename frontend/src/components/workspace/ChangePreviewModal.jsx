@@ -8,7 +8,7 @@ export default function ChangePreviewModal({
   onApply,
   applying
 }) {
-  const [viewTab, setViewTab] = useState('after'); // 'after' | 'before'
+  const [viewTab, setViewTab] = useState('after');
 
   if (!isOpen || !previewData) return null;
 

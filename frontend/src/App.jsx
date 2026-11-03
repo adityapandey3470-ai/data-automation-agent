@@ -14,18 +14,18 @@ import OnboardingModal from './components/launch/OnboardingModal';
 import AuthModal from './components/auth/AuthModal';
 import SavedProjectsModal from './components/workspace/SavedProjectsModal';
 import ErrorBoundary from './components/shared/ErrorBoundary';
-import { getWorkbookStatus, selectWorkspaceFile, deleteWorkspaceFile, getStoredUser, clearStoredAuth } from './services/api';
+import { getWorkbookStatus, selectWorkspaceFile, deleteWorkspaceFile, getStoredUser, clearStoredAuth, getCurrentUser, getStoredToken, setStoredAuth } from './services/api';
 
 const VALID_PAGES = ['overview', 'workspace', 'assistant', 'analytics', 'export', 'admin', 'settings'];
 
 function getInitialPage() {
   if (typeof window !== 'undefined') {
-    // 1. URL Hash has highest priority on page refresh
+
     const hash = window.location.hash.replace(/^#\/?/, '').split('?')[0].split('/')[0];
     if (hash && VALID_PAGES.includes(hash)) {
       return hash;
     }
-    // 2. Persistent localStorage fallback
+
     const saved = localStorage.getItem('tabufinery_active_page');
     if (saved && VALID_PAGES.includes(saved)) {
       return saved;
@@ -42,15 +42,26 @@ export default function App() {
   const [refreshKey, setRefreshKey] = useState(0);
 
   const [currentUser, setCurrentUser] = useState(() => getStoredUser());
-  const [showAuthModal, setShowAuthModal] = useState(false);
+  const [showAuthModal, setShowAuthModal] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      return params.has('verifyToken') || params.has('resetToken');
+    }
+    return false;
+  });
   const [showProjectsModal, setShowProjectsModal] = useState(false);
 
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
-  // Splash & Onboarding states: only run splash once per browser session (never on page refresh)
   const [showSplash, setShowSplash] = useState(() => {
-    if (typeof window !== 'undefined' && sessionStorage.getItem('tabufinery_session_active')) {
-      return false;
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      if (params.has('verifyToken') || params.has('resetToken')) {
+        return false;
+      }
+      if (sessionStorage.getItem('tabufinery_session_active')) {
+        return false;
+      }
     }
     return true;
   });
@@ -94,7 +105,6 @@ export default function App() {
     return 'dark';
   });
 
-  // Listen for unauthorized 401 events globally across all API requests
   useEffect(() => {
     const handleUnauthorized = () => {
       clearStoredAuth();
@@ -109,7 +119,33 @@ export default function App() {
       }
     };
     window.addEventListener('tabufinery_unauthorized', handleUnauthorized);
-    return () => window.removeEventListener('tabufinery_unauthorized', handleUnauthorized);
+
+    const handleUserUpdated = (e) => {
+      if (e?.detail) {
+        setCurrentUser(prev => {
+          const merged = { ...(prev || {}), ...e.detail };
+          setStoredAuth(getStoredToken(), merged);
+          return merged;
+        });
+      }
+    };
+    window.addEventListener('tabufinery_user_updated', handleUserUpdated);
+
+    if (getStoredToken()) {
+      getCurrentUser()
+        .then(res => {
+          if (res?.data) {
+            setCurrentUser(res.data);
+            setStoredAuth(getStoredToken(), res.data);
+          }
+        })
+        .catch(() => {});
+    }
+
+    return () => {
+      window.removeEventListener('tabufinery_unauthorized', handleUnauthorized);
+      window.removeEventListener('tabufinery_user_updated', handleUserUpdated);
+    };
   }, []);
 
   useEffect(() => {

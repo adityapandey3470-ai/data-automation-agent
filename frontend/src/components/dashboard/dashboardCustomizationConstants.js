@@ -40,6 +40,12 @@ export const DASHBOARD_STYLE_PRESETS = [
     name: 'Neumorphism',
     description: 'Soft dual-layer raised elements with embossed depth and tactile buttons.',
     badge: 'Tactile'
+  },
+  {
+    id: 'cyberpunk',
+    name: 'Cyberpunk / Neon Glow',
+    description: 'Futuristic high-tech aesthetic with luminous neon borders, electric emerald glow, and deep cyber depth.',
+    badge: 'Neon Glow'
   }
 ];
 
@@ -298,6 +304,23 @@ export const COLOR_PALETTES = [
     textMuted: '#0d9488',
     chartColors: ['#059669', '#0891b2', '#2dd4bf', '#38bdf8'],
     accentSubtle: '#ccfbf1'
+  },
+  {
+    id: 'obsidian_gold',
+    name: 'Obsidian & Gold',
+    primary: '#f59e0b',
+    primaryHover: '#d97706',
+    primarySubtle: 'rgba(245, 158, 11, 0.15)',
+    secondary: '#eab308',
+    bg: '#0a0e17',
+    surface: '#0f172a',
+    cardBg: '#131c2e',
+    border: '#293548',
+    textPrimary: '#f8fafc',
+    textSecondary: '#94a3b8',
+    textMuted: '#64748b',
+    chartColors: ['#f59e0b', '#eab308', '#f97316', '#fbbf24'],
+    accentSubtle: 'rgba(245, 158, 11, 0.2)'
   }
 ];
 
@@ -305,32 +328,50 @@ export const GRADIENT_PRESETS = [
   {
     id: 'aurora',
     name: 'Aurora Borealis',
-    gradient: 'linear-gradient(135deg, rgba(79, 70, 229, 0.08) 0%, rgba(6, 182, 212, 0.08) 50%, rgba(16, 185, 129, 0.08) 100%)'
+    gradient: 'linear-gradient(135deg, rgba(79, 70, 229, 0.08) 0%, rgba(6, 182, 212, 0.08) 50%, rgba(16, 185, 129, 0.08) 100%)',
+    css: 'linear-gradient(135deg, rgba(79, 70, 229, 0.08) 0%, rgba(6, 182, 212, 0.08) 50%, rgba(16, 185, 129, 0.08) 100%)'
   },
   {
     id: 'cosmic',
     name: 'Cosmic Midnight',
-    gradient: 'radial-gradient(ellipse at top, rgba(99, 102, 241, 0.15), rgba(15, 23, 42, 0) 70%)'
+    gradient: 'radial-gradient(ellipse at top, rgba(99, 102, 241, 0.15), rgba(15, 23, 42, 0) 70%)',
+    css: 'radial-gradient(ellipse at top, rgba(99, 102, 241, 0.15), rgba(15, 23, 42, 0) 70%)'
   },
   {
     id: 'sunset_glow',
     name: 'Sunset Glow',
-    gradient: 'linear-gradient(135deg, rgba(249, 115, 22, 0.08) 0%, rgba(219, 39, 119, 0.08) 100%)'
+    gradient: 'linear-gradient(135deg, rgba(249, 115, 22, 0.08) 0%, rgba(219, 39, 119, 0.08) 100%)',
+    css: 'linear-gradient(135deg, rgba(249, 115, 22, 0.08) 0%, rgba(219, 39, 119, 0.08) 100%)'
   },
   {
     id: 'oceanic_breeze',
     name: 'Oceanic Breeze',
-    gradient: 'linear-gradient(180deg, rgba(2, 132, 199, 0.08) 0%, rgba(240, 249, 255, 0) 100%)'
+    gradient: 'linear-gradient(180deg, rgba(2, 132, 199, 0.08) 0%, rgba(240, 249, 255, 0) 100%)',
+    css: 'linear-gradient(180deg, rgba(2, 132, 199, 0.08) 0%, rgba(240, 249, 255, 0) 100%)'
   },
   {
     id: 'soft_slate',
     name: 'Soft Slate',
-    gradient: 'linear-gradient(135deg, rgba(148, 163, 184, 0.08) 0%, rgba(241, 245, 249, 0.5) 100%)'
+    gradient: 'linear-gradient(135deg, rgba(148, 163, 184, 0.08) 0%, rgba(241, 245, 249, 0.5) 100%)',
+    css: 'linear-gradient(135deg, rgba(148, 163, 184, 0.08) 0%, rgba(241, 245, 249, 0.5) 100%)'
   },
   {
     id: 'frosted_mesh',
     name: 'Frosted Mesh',
-    gradient: 'radial-gradient(circle at 10% 20%, rgba(124, 58, 237, 0.06) 0%, transparent 40%), radial-gradient(circle at 90% 80%, rgba(56, 189, 248, 0.06) 0%, transparent 40%)'
+    gradient: 'radial-gradient(circle at 10% 20%, rgba(124, 58, 237, 0.06) 0%, transparent 40%), radial-gradient(circle at 90% 80%, rgba(56, 189, 248, 0.06) 0%, transparent 40%)',
+    css: 'radial-gradient(circle at 10% 20%, rgba(124, 58, 237, 0.06) 0%, transparent 40%), radial-gradient(circle at 90% 80%, rgba(56, 189, 248, 0.06) 0%, transparent 40%)'
+  },
+  {
+    id: 'cyber_emerald',
+    name: 'Cyber Emerald',
+    gradient: 'radial-gradient(circle at 15% 15%, rgba(16, 185, 129, 0.12) 0%, transparent 45%), radial-gradient(circle at 85% 85%, rgba(6, 182, 212, 0.10) 0%, transparent 50%), linear-gradient(135deg, rgba(5, 150, 105, 0.04) 0%, rgba(15, 23, 42, 0.02) 100%)',
+    css: 'radial-gradient(circle at 15% 15%, rgba(16, 185, 129, 0.12) 0%, transparent 45%), radial-gradient(circle at 85% 85%, rgba(6, 182, 212, 0.10) 0%, transparent 50%), linear-gradient(135deg, rgba(5, 150, 105, 0.04) 0%, rgba(15, 23, 42, 0.02) 100%)'
+  },
+  {
+    id: 'neon_amethyst',
+    name: 'Neon Amethyst',
+    gradient: 'radial-gradient(circle at 80% 20%, rgba(168, 85, 247, 0.12) 0%, transparent 50%), radial-gradient(circle at 20% 80%, rgba(236, 72, 153, 0.10) 0%, transparent 50%), linear-gradient(135deg, rgba(99, 102, 241, 0.04) 0%, rgba(15, 23, 42, 0) 100%)',
+    css: 'radial-gradient(circle at 80% 20%, rgba(168, 85, 247, 0.12) 0%, transparent 50%), radial-gradient(circle at 20% 80%, rgba(236, 72, 153, 0.10) 0%, transparent 50%), linear-gradient(135deg, rgba(99, 102, 241, 0.04) 0%, rgba(15, 23, 42, 0) 100%)'
   }
 ];
 

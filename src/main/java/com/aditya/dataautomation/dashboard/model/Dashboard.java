@@ -10,10 +10,6 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 
-/**
- * A dashboard containing multiple widgets.
- * Thread-safe concurrent widget storage.
- */
 @Getter
 @Setter
 @Builder

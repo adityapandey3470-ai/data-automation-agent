@@ -7,9 +7,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 
-/**
- * Thread-safe sliding window rate limiter with automatic memory cleanup.
- */
 @Slf4j
 @Service
 public class RateLimiterService {
@@ -26,10 +23,6 @@ public class RateLimiterService {
         }
     }
 
-    /**
-     * Attempts to acquire an execution permit and returns detailed rate limit results
-     * including accurate Retry-After seconds calculated against the sliding window.
-     */
     public RateLimitResult tryAcquireWithResult(String key, int maxRequests, int windowSeconds) {
         if (key == null || key.isBlank()) {
             return RateLimitResult.permit();
@@ -39,7 +32,6 @@ public class RateLimiterService {
         long windowMillis = (long) windowSeconds * 1000L;
         long windowStart = now - windowMillis;
 
-        // Bounded map safeguard against memory exhaustion
         if (requestWindows.size() > MAX_TRACKED_KEYS) {
             pruneExpiredWindows(windowStart);
         }
@@ -54,7 +46,7 @@ public class RateLimiterService {
                 timestamps.removeIf(t -> t < windowStart);
 
                 if (timestamps.size() >= maxRequests) {
-                    // Determine the oldest active request that must roll out of the sliding window
+
                     long oldestTimestamp = timestamps.get(0);
                     long expiryTime = oldestTimestamp + windowMillis;
                     long remainingMillis = Math.max(0, expiryTime - now);
@@ -71,23 +63,12 @@ public class RateLimiterService {
         return result[0];
     }
 
-    /**
-     * Automatic scheduled background maintenance to evict expired rate-limit buckets.
-     */
     @org.springframework.scheduling.annotation.Scheduled(fixedRate = 60000)
     public void scheduledEviction() {
         long fiveMinutesAgo = System.currentTimeMillis() - 300_000L;
         pruneExpiredWindows(fiveMinutesAgo);
     }
 
-    /**
-     * Attempts to acquire an execution permit.
-     *
-     * @param key           Identifier (e.g., client IP or User ID + action)
-     * @param maxRequests   Allowed requests within the window
-     * @param windowSeconds Window length in seconds
-     * @return true if allowed; false if rate limit exceeded
-     */
     public boolean tryAcquire(String key, int maxRequests, int windowSeconds) {
         return tryAcquireWithResult(key, maxRequests, windowSeconds).allowed();
     }

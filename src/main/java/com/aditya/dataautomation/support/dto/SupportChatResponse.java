@@ -22,5 +22,5 @@ public class SupportChatResponse {
     @Builder.Default
     private boolean canEscalateToTicket = false;
 
-    private String engine; // "GEMINI_AI" or "KNOWLEDGE_BASE"
+    private String engine;
 }

@@ -10,9 +10,6 @@ import org.springframework.validation.annotation.Validated;
 @ConfigurationProperties(prefix = "app.ai.gemini")
 public class GeminiProperties {
 
-    /**
-     * API key for Google Gemini AI. If omitted, the platform gracefully degrades to deterministic analysis.
-     */
     private String apiKey;
 
     private String model = "gemini-2.5-flash";

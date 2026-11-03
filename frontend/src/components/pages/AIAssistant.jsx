@@ -2,14 +2,13 @@ import React, { useState, useEffect, useCallback } from 'react';
 import {
   getStatistics, filterRows, sortRows, groupBy, findDuplicates,
   removeDuplicates, handleMissing, cleanStrings,
-  getAiStatus, getDataProfile, askAiAnalyst, getErrorMessage
+  getAiStatus, getDataProfile, askAiAnalyst, getAiQuota, getErrorMessage
 } from '../../services/api';
 import {
   Sparkles, Play, Check, AlertCircle, Copy, ArrowRight,
-  RefreshCw, Lightbulb, Zap, X, Shield, CheckCircle
+  RefreshCw, Lightbulb, Zap, X, Shield, CheckCircle, Crown, Lock, Building2, Clock
 } from '../icons/Icons';
 
-// Safe sessionStorage writer with automatic LRU eviction for QuotaExceededError
 const safeSessionStorageSet = (key, value) => {
   try {
     sessionStorage.setItem(key, value);
@@ -68,6 +67,29 @@ export default function AIAssistant({ sheetName, loaded, onRefresh, onNavigate, 
 
   const [pendingAction, setPendingAction] = useState(null);
 
+  const [quota, setQuota] = useState({
+    subscriptionTier: currentUser?.subscriptionTier || 'FREE',
+    queriesUsed: currentUser?.aiQueriesUsed || 0,
+    queriesLimit: currentUser?.aiQueriesLimit || 10,
+    remainingQueries: Math.max(0, (currentUser?.aiQueriesLimit || 10) - (currentUser?.aiQueriesUsed || 0)),
+    totalTokensUsed: currentUser?.totalTokensUsed || 0,
+    isLimitReached: (currentUser?.aiQueriesUsed || 0) >= (currentUser?.aiQueriesLimit || 10) && currentUser?.role !== 'ROLE_ADMIN' && (currentUser?.subscriptionTier || 'FREE') === 'FREE',
+    isAdmin: currentUser?.role === 'ROLE_ADMIN'
+  });
+  const [showUpgradeModal, setShowUpgradeModal] = useState(false);
+  const [selectedPlanCard, setSelectedPlanCard] = useState('PRO');
+  const [planNotice, setPlanNotice] = useState(null);
+
+  useEffect(() => {
+    if (currentUser) {
+      getAiQuota()
+        .then(res => {
+          if (res.data) setQuota(res.data);
+        })
+        .catch(() => {});
+    }
+  }, [currentUser]);
+
   const loadProfile = useCallback(async (forceRefresh = false) => {
     if (!loaded || !sheetName) return;
     if (forceRefresh) {
@@ -116,6 +138,17 @@ export default function AIAssistant({ sheetName, loaded, onRefresh, onNavigate, 
     try {
       const res = await askAiAnalyst(q, sheetName);
       const respData = res.data;
+      if (respData.subscriptionTier) {
+        setQuota(prev => ({
+          ...prev,
+          subscriptionTier: respData.subscriptionTier,
+          queriesUsed: respData.queriesUsed,
+          queriesLimit: respData.queriesLimit,
+          remainingQueries: respData.remainingQueries,
+          totalTokensUsed: (prev.totalTokensUsed || 0) + (respData.tokensConsumed || 0),
+          isLimitReached: respData.remainingQueries === 0 && respData.subscriptionTier === 'FREE' && !prev.isAdmin
+        }));
+      }
       setAnalystResponses(prev => [
         ...prev,
         {
@@ -125,6 +158,10 @@ export default function AIAssistant({ sheetName, loaded, onRefresh, onNavigate, 
         }
       ]);
     } catch (err) {
+      if (err.response?.status === 429 || err.response?.data?.error === 'QUOTA_EXCEEDED') {
+        setQuota(prev => ({ ...prev, isLimitReached: true, remainingQueries: 0 }));
+        setShowUpgradeModal(true);
+      }
       setAnalystResponses(prev => [
         ...prev,
         {
@@ -305,48 +342,143 @@ export default function AIAssistant({ sheetName, loaded, onRefresh, onNavigate, 
             </span>
           </div>
 
-          <div className="card mb-20 p-16">
-            <div className="ai-analyst-input-box">
-              <Sparkles size={18} className="text-emerald" style={{ flexShrink: 0 }} />
-              <input
-                id="ai-analyst-question-input"
-                name="aiQuestion"
-                className="ai-analyst-input"
-                value={input}
-                onChange={e => setInput(e.target.value)}
-                onKeyDown={e => { if (e.key === 'Enter') handleAsk(); }}
-                placeholder={`Ask any analytical question about ${sheetName} (e.g., 'What are the main quality issues?', 'Are there extreme outliers?')...`}
-                aria-label="Ask analytical question"
-                autoComplete="off"
-                disabled={running}
-              />
-              <button
-                className="btn btn-primary btn-sm ai-ask-btn"
-                onClick={() => handleAsk()}
-                disabled={running || !input.trim()}
-              >
-                {running ? <><div className="spinner" /> Analyzing...</> : <><Play size={13} /> Ask Analyst</>}
-              </button>
-            </div>
-
-            {profile?.suggestedQuestions?.length > 0 && (
-              <div className="suggested-prompts-container mt-12">
-                <span className="text-xs text-secondary" style={{ fontWeight: 600 }}>Suggested:</span>
-                <div className="suggested-chips-flow">
-                  {profile.suggestedQuestions.slice(0, 3).map((sq, i) => (
-                    <button
-                      key={i}
-                      className="suggested-prompt-chip"
-                      onClick={() => handleAsk(sq)}
-                      disabled={running}
-                    >
-                      {sq}
-                    </button>
-                  ))}
+          {!currentUser ? (
+            <div className="card mb-20 p-20 ai-auth-barrier-card">
+              <div className="ai-auth-barrier-left flex-gap" style={{ alignItems: 'center' }}>
+                <div className="ai-auth-barrier-icon">
+                  <Sparkles size={22} className="text-emerald" />
+                </div>
+                <div>
+                  <h4 style={{ margin: '0 0 4px 0', fontSize: 15, fontWeight: 700 }}>Sign in to activate AI Analyst</h4>
+                  <p className="text-secondary" style={{ margin: 0, fontSize: 13 }}>
+                    Registered users receive 10 free AI queries, automatic statistical audits, outlier discovery, and smart cleaning suggestions.
+                  </p>
                 </div>
               </div>
-            )}
-          </div>
+              <button className="btn btn-primary btn-sm flex-gap" onClick={onRequestAuth} style={{ whiteSpace: 'nowrap' }}>
+                <Zap size={14} /> Sign In / Register
+              </button>
+            </div>
+          ) : (
+            <div className="card mb-20 p-12 ai-quota-card">
+              <div className="ai-quota-bar-top flex-between" style={{ flexWrap: 'wrap', gap: 10 }}>
+                <div className="flex-gap" style={{ alignItems: 'center' }}>
+                  {quota.isAdmin || quota.subscriptionTier === 'ENTERPRISE' ? (
+                    <span className="badge badge-emerald flex-gap" style={{ padding: '4px 8px', fontSize: 11, fontWeight: 700 }}>
+                      <Building2 size={12} /> ENTERPRISE
+                    </span>
+                  ) : quota.subscriptionTier === 'PRO' ? (
+                    <span className="badge badge-indigo flex-gap" style={{ padding: '4px 8px', fontSize: 11, fontWeight: 700 }}>
+                      <Crown size={12} /> PRO PLAN
+                    </span>
+                  ) : (
+                    <span className="badge badge-neutral flex-gap" style={{ padding: '4px 8px', fontSize: 11, fontWeight: 700 }}>
+                      <Zap size={12} /> FREE TIER
+                    </span>
+                  )}
+                  <span style={{ fontSize: 13, fontWeight: 600 }}>
+                    {quota.isAdmin || quota.subscriptionTier === 'ENTERPRISE'
+                      ? 'Unlimited AI Queries'
+                      : `${quota.queriesUsed} of ${quota.queriesLimit} ${quota.subscriptionTier === 'PRO' ? 'Pro' : 'Free'} Queries Used`}
+                  </span>
+                </div>
+
+                <div className="flex-gap" style={{ alignItems: 'center' }}>
+                  {quota.totalTokensUsed > 0 && (
+                    <span className="text-secondary" style={{ fontSize: 11, fontWeight: 500 }}>
+                      {Number(quota.totalTokensUsed).toLocaleString()} Tokens Processed
+                    </span>
+                  )}
+                  {quota.subscriptionTier === 'FREE' && !quota.isAdmin && (
+                    <button
+                      type="button"
+                      className="btn btn-xs btn-outline flex-gap text-amber"
+                      onClick={() => setShowUpgradeModal(true)}
+                    >
+                      <Crown size={12} /> Upgrade to Pro
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {!quota.isAdmin && quota.subscriptionTier !== 'ENTERPRISE' && (
+                <div className="ai-quota-track mt-8">
+                  <div
+                    className={`ai-quota-fill ${quota.isLimitReached ? 'danger' : quota.queriesUsed >= quota.queriesLimit * 0.8 ? 'warning' : ''}`}
+                    style={{ width: `${Math.min(100, (quota.queriesUsed / quota.queriesLimit) * 100)}%` }}
+                  />
+                </div>
+              )}
+            </div>
+          )}
+
+          {currentUser && quota.isLimitReached ? (
+            <div className="card mb-20 p-24 ai-limit-box">
+              <div className="ai-limit-icon-wrap">
+                <Lock size={26} className="text-amber" />
+              </div>
+              <div className="ai-limit-info">
+                <h3 style={{ margin: '0 0 6px 0', fontSize: 16, fontWeight: 700 }}>
+                  {quota.subscriptionTier === 'PRO' ? 'Pro Plan AI Limit Reached' : 'Free AI Query Limit Reached'}
+                </h3>
+                <p className="text-secondary" style={{ margin: 0, fontSize: 13, lineHeight: 1.6 }}>
+                  {quota.subscriptionTier === 'PRO'
+                    ? `You have consumed all ${quota.queriesLimit} queries allocated to your Pro account. Please contact support or upgrade to Enterprise for unlimited queries.`
+                    : `You have consumed all ${quota.queriesLimit} free AI analyst queries allocated to your starter account. Upgrade to Pro to unlock 500 queries per month, advanced correlation matrices, automatic chart creation, and priority processing.`}
+                </p>
+                {quota.subscriptionTier === 'FREE' && !quota.isAdmin && (
+                  <div className="flex-gap mt-16">
+                    <button className="btn btn-primary btn-sm flex-gap" onClick={() => setShowUpgradeModal(true)}>
+                      <Crown size={14} /> Upgrade to Pro Plan
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          ) : (
+            <div className="card mb-20 p-16">
+              <div className="ai-analyst-input-box">
+                <Sparkles size={18} className="text-emerald" style={{ flexShrink: 0 }} />
+                <input
+                  id="ai-analyst-question-input"
+                  name="aiQuestion"
+                  className="ai-analyst-input"
+                  value={input}
+                  onChange={e => setInput(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') handleAsk(); }}
+                  placeholder={`Ask any analytical question about ${sheetName} (e.g., 'What are the main quality issues?', 'Are there extreme outliers?')...`}
+                  aria-label="Ask analytical question"
+                  autoComplete="off"
+                  disabled={running || !currentUser}
+                />
+                <button
+                  className="btn btn-primary btn-sm ai-ask-btn"
+                  onClick={() => handleAsk()}
+                  disabled={running || !input.trim() || !currentUser}
+                >
+                  {running ? <><div className="spinner" /> Analyzing...</> : <><Play size={13} /> Ask Analyst</>}
+                </button>
+              </div>
+
+              {profile?.suggestedQuestions?.length > 0 && (
+                <div className="suggested-prompts-container mt-12">
+                  <span className="text-xs text-secondary" style={{ fontWeight: 600 }}>Suggested:</span>
+                  <div className="suggested-chips-flow">
+                    {profile.suggestedQuestions.slice(0, 3).map((sq, i) => (
+                      <button
+                        key={i}
+                        className="suggested-prompt-chip"
+                        onClick={() => handleAsk(sq)}
+                        disabled={running || !currentUser}
+                      >
+                        {sq}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
 
           {analystResponses.length > 0 ? (
             <div className="analyst-stream mb-20">
@@ -904,6 +1036,142 @@ export default function AIAssistant({ sheetName, loaded, onRefresh, onNavigate, 
                   <><Zap size={13} /> Confirm & Apply Fix</>
                 )}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {showUpgradeModal && (
+        <div className="modal-backdrop active" onClick={() => setShowUpgradeModal(false)}>
+          <div className="modal-dialog ai-upgrade-dialog" onClick={e => e.stopPropagation()} style={{ maxWidth: 840 }}>
+            <div className="modal-header">
+              <div className="flex-gap" style={{ alignItems: 'center' }}>
+                <Crown size={20} className="text-amber" />
+                <h3 className="modal-title">Upgrade AI Analyst Quota</h3>
+              </div>
+              <button className="btn-icon" onClick={() => setShowUpgradeModal(false)} aria-label="Close modal">
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="modal-body" style={{ padding: 24 }}>
+              <p className="text-secondary text-sm mb-16">
+                Supercharge your tabular workflow with deeper AI audits, automated cleaning scripts, and priority Gemini LLM execution.
+              </p>
+
+              {planNotice && (
+                <div className="alert alert-warning mb-16 flex-between" style={{ background: 'rgba(245, 158, 11, 0.1)', border: '1px solid rgba(245, 158, 11, 0.3)', color: '#d97706', padding: '10px 14px', borderRadius: 8 }}>
+                  <div className="flex-gap" style={{ alignItems: 'center' }}>
+                    <Clock size={16} style={{ flexShrink: 0 }} />
+                    <span style={{ fontSize: 13, fontWeight: 600 }}>{planNotice}</span>
+                  </div>
+                  <button type="button" className="btn-icon" onClick={() => setPlanNotice(null)} style={{ padding: 2 }} aria-label="Dismiss">
+                    <X size={14} />
+                  </button>
+                </div>
+              )}
+
+              <div className="ai-pricing-grid">
+                <div
+                  className={`ai-pricing-card ${selectedPlanCard === 'FREE' ? 'selected free-selected' : ''}`}
+                  onClick={() => {
+                    setSelectedPlanCard('FREE');
+                    setPlanNotice(null);
+                  }}
+                >
+                  <div className="ai-pricing-header">
+                    <span className="badge badge-neutral"><Zap size={12} /> Starter</span>
+                    <h4>Free Tier</h4>
+                    <div className="ai-pricing-amount">$0 <span>/ lifetime</span></div>
+                  </div>
+                  <ul className="ai-pricing-features">
+                    <li><Check size={14} className="text-emerald" /> 10 AI Analyst Queries</li>
+                    <li><Check size={14} className="text-emerald" /> Basic Statistical Profiling</li>
+                    <li><Check size={14} className="text-emerald" /> Deterministic Quality Engine</li>
+                    <li><Check size={14} className="text-emerald" /> Excel & CSV Data Workspaces</li>
+                  </ul>
+                  <button
+                    type="button"
+                    className={`btn btn-sm w-full mt-16 ${selectedPlanCard === 'FREE' ? 'btn-primary' : 'btn-outline'}`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setSelectedPlanCard('FREE');
+                      setPlanNotice(null);
+                      setShowUpgradeModal(false);
+                    }}
+                  >
+                    {quota.subscriptionTier === 'FREE' ? 'Current Plan (Active)' : 'Continue with Free'}
+                  </button>
+                </div>
+
+                <div
+                  className={`ai-pricing-card featured ${selectedPlanCard === 'PRO' ? 'selected' : ''}`}
+                  onClick={() => {
+                    setSelectedPlanCard('PRO');
+                    setPlanNotice("Available Soon! Online card & UPI payment gateway will be integrated soon.");
+                  }}
+                >
+                  <div className="ai-pricing-badge">MOST POPULAR</div>
+                  <div className="ai-pricing-header">
+                    <span className="badge badge-indigo"><Crown size={12} /> Professional</span>
+                    <h4>Pro Member</h4>
+                    <div className="ai-pricing-amount">$19 <span>/ month</span></div>
+                  </div>
+                  <ul className="ai-pricing-features">
+                    <li><Check size={14} className="text-emerald" /> <strong>500 AI Analyst Queries</strong> / mo</li>
+                    <li><Check size={14} className="text-emerald" /> High-Priority Gemini LLM Model</li>
+                    <li><Check size={14} className="text-emerald" /> Automated Multi-Step Data Cleaning</li>
+                    <li><Check size={14} className="text-emerald" /> Executive Chart Customization Suite</li>
+                    <li><Check size={14} className="text-emerald" /> Priority Support & Audit Logs</li>
+                  </ul>
+                  <button
+                    type="button"
+                    className={`btn btn-sm w-full mt-16 ${quota.subscriptionTier === 'PRO' ? 'btn-outline' : 'btn-primary'}`}
+                    disabled={quota.subscriptionTier === 'PRO'}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (quota.subscriptionTier === 'PRO') return;
+                      setSelectedPlanCard('PRO');
+                      setPlanNotice("Available Soon! Online card & UPI payment gateway will be integrated soon.");
+                    }}
+                  >
+                    <Crown size={14} /> {quota.subscriptionTier === 'PRO' ? 'Current Plan (Active)' : 'Available Soon'}
+                  </button>
+                </div>
+
+                <div
+                  className={`ai-pricing-card ${selectedPlanCard === 'ENTERPRISE' ? 'selected' : ''}`}
+                  onClick={() => {
+                    setSelectedPlanCard('ENTERPRISE');
+                    setPlanNotice("Available Soon! Enterprise team contracts and custom SLAs will be available soon.");
+                  }}
+                >
+                  <div className="ai-pricing-header">
+                    <span className="badge badge-emerald"><Building2 size={12} /> Enterprise</span>
+                    <h4>Enterprise</h4>
+                    <div className="ai-pricing-amount">$99 <span>/ month</span></div>
+                  </div>
+                  <ul className="ai-pricing-features">
+                    <li><Check size={14} className="text-emerald" /> <strong>Unlimited AI Queries</strong></li>
+                    <li><Check size={14} className="text-emerald" /> Dedicated Engine Instance & SLAs</li>
+                    <li><Check size={14} className="text-emerald" /> Team Collaboration & Shared Workbooks</li>
+                    <li><Check size={14} className="text-emerald" /> Full Audit Trail & Security Logs</li>
+                    <li><Check size={14} className="text-emerald" /> Custom API Rate Limits</li>
+                  </ul>
+                  <button
+                    type="button"
+                    className="btn btn-outline btn-sm w-full mt-16"
+                    disabled={quota.subscriptionTier === 'ENTERPRISE'}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (quota.subscriptionTier === 'ENTERPRISE') return;
+                      setSelectedPlanCard('ENTERPRISE');
+                      setPlanNotice("Available Soon! Enterprise team contracts and custom SLAs will be available soon.");
+                    }}
+                  >
+                    <Building2 size={14} /> {quota.subscriptionTier === 'ENTERPRISE' ? 'Current Plan (Active)' : 'Available Soon'}
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
         </div>

@@ -18,9 +18,6 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
-/**
- * In-memory dashboard engine with strict User and Workbook Ownership isolation.
- */
 @Slf4j
 @Service
 public class DashboardServiceImpl implements DashboardService {
@@ -50,7 +47,6 @@ public class DashboardServiceImpl implements DashboardService {
         DateTimeFormatter.ofPattern("MMM yyyy", Locale.ENGLISH)
     };
 
-    // Keyed by dashboardId with bounded size and TTL to prevent memory leaks
     private static final int MAX_DASHBOARDS = 200;
     private final Map<String, Dashboard> dashboards = new ConcurrentHashMap<>();
 
@@ -67,7 +63,7 @@ public class DashboardServiceImpl implements DashboardService {
         if (dashboards.size() >= MAX_DASHBOARDS) {
             cleanupExpiredDashboards();
             if (dashboards.size() >= MAX_DASHBOARDS) {
-                // If still full after TTL cleanup, remove oldest entry by createdAt
+
                 dashboards.entrySet().stream()
                         .filter(e -> e.getValue().getCreatedAt() != null)
                         .min(Comparator.comparing(e -> e.getValue().getCreatedAt()))
@@ -156,7 +152,6 @@ public class DashboardServiceImpl implements DashboardService {
         validateWorkbook(workbook);
         Dashboard dashboard = getDashboardAndVerifyOwnership(userId, dashboardId);
 
-        // Recompute all widget data safely using a defensive snapshot list
         List<DashboardWidget> widgets = new ArrayList<>(dashboard.getWidgets());
         for (DashboardWidget widget : widgets) {
             ExcelSheetData sheet = resolveSheet(workbook, widget.getSheetName());
@@ -201,7 +196,7 @@ public class DashboardServiceImpl implements DashboardService {
         if (d == null) {
             throw new DashboardException("Dashboard not found: " + dashboardId);
         }
-        // Enforce user ownership if userId is supplied (authenticated context)
+
         if (userId != null && !Objects.equals(d.getUserId(), userId)) {
             log.warn("Access denied: userId={} attempted to access dashboardId={} owned by userId={}",
                     userId, dashboardId, d.getUserId());
@@ -536,7 +531,6 @@ public class DashboardServiceImpl implements DashboardService {
                     .build());
         }
 
-        // 1. Categorical charts: keep top 10 and aggregate remainder into "Other (N categories)" bucket
         if (points.size() > 12 && (widget.getType() == WidgetType.BAR_CHART
                 || widget.getType() == WidgetType.PIE_CHART
                 || widget.getType() == WidgetType.DONUT_CHART)) {
@@ -583,7 +577,6 @@ public class DashboardServiceImpl implements DashboardService {
             points = top10;
         }
 
-        // 2. Time-series / trend charts: sort chronologically and downsample to 40 representative buckets
         if (widget.getType() == WidgetType.AREA_CHART || widget.getType() == WidgetType.LINE_CHART) {
             List<PointWithTime> timedPoints = new ArrayList<>(points.size());
             int validDates = 0;
@@ -637,7 +630,7 @@ public class DashboardServiceImpl implements DashboardService {
 
         char c0 = s.charAt(0);
         if (c0 < '0' || c0 > '9') {
-            // might be 'MMM yyyy' or 'dd MMM'
+
             if (!Character.isLetter(c0)) return null;
         }
 
@@ -749,14 +742,12 @@ public class DashboardServiceImpl implements DashboardService {
         List<Map<String, Object>> rows = sheet.getRows();
         if (rows == null || rows.isEmpty()) return;
 
-        // Instant validation on sample first
         int limit = Math.min(rows.size(), 200);
         for (int i = 0; i < limit; i++) {
             Object val = rows.get(i).get(resolved);
             if (isQuickNumeric(val)) return;
         }
 
-        // Full scan only if first 200 had nulls/blanks
         for (Map<String, Object> r : rows) {
             Object val = r.get(resolved);
             if (isQuickNumeric(val)) return;

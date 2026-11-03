@@ -14,7 +14,7 @@ import lombok.NoArgsConstructor;
 public class CreateTicketRequest {
 
     @NotBlank(message = "Category is required")
-    private String category; // "BUG", "FEATURE", "DATA_PROCESSING", "ACCOUNT", "OTHER"
+    private String category;
 
     @NotBlank(message = "Subject is required")
     @Size(min = 3, max = 150, message = "Subject must be between 3 and 150 characters")

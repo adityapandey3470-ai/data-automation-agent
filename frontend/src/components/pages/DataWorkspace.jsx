@@ -46,16 +46,14 @@ export default function DataWorkspace({
     } catch {}
   }, [viewMode]);
 
-  // Per-sheet in-memory cache to prevent redundant re-fetching & freeze on toggle
   const sheetDataCacheRef = useRef({});
 
   const [searchQuery, setSearchQuery] = useState('');
   const [sortColumn, setSortColumn] = useState(null);
-  const [sortDirection, setSortDirection] = useState('asc'); // 'asc' | 'desc'
+  const [sortDirection, setSortDirection] = useState('asc');
 
   const rawRows = preview?.rows || [];
 
-  // Memoized filter and sort across entire active dataset (<20ms for 60k rows)
   const processedRows = useMemo(() => {
     if (!rawRows.length) return [];
     let list = rawRows;
@@ -90,12 +88,10 @@ export default function DataWorkspace({
     return list;
   }, [rawRows, searchQuery, sortColumn, sortDirection]);
 
-  // Guaranteed: In Top 100 Preview mode, NEVER render more than 100 rows into DOM
   const displayRows = useMemo(() => {
     return viewMode === 'preview' ? processedRows.slice(0, 100) : processedRows;
   }, [processedRows, viewMode]);
 
-  // Virtualizer for 'full' sheet view mode (60k+ rows) with useFlushSync disabled for smooth scrolling
   const tableContainerRef = useRef(null);
   const rowVirtualizer = useVirtualizer({
     count: viewMode === 'full' ? processedRows.length : 0,
@@ -160,7 +156,6 @@ export default function DataWorkspace({
     }
   }, [headers, cleanCol]);
 
-  // Smart cached data fetcher: avoids redundant 20MB network transfers
   const loadData = useCallback(async () => {
     if (!sheetName) return;
     const cached = sheetDataCacheRef.current[sheetName];
@@ -229,7 +224,6 @@ export default function DataWorkspace({
     }
   };
 
-  // Undo / Redo Keyboard Shortcuts (Ctrl+Z, Ctrl+Y / Ctrl+Shift+Z)
   useEffect(() => {
     const handleKeyDown = (e) => {
       if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
@@ -776,7 +770,7 @@ export default function DataWorkspace({
                 </thead>
                 <tbody>
                   {viewMode === 'preview' ? (
-                    /* Top 100 Preview mode — strictly at most 100 rows rendered */
+
                     displayRows.length === 0 ? (
                       <tr>
                         <td
@@ -803,7 +797,7 @@ export default function DataWorkspace({
                       ))
                     )
                   ) : (
-                    /* Full Sheet Data mode — virtualized rendering for 60k+ rows */
+
                     processedRows.length === 0 ? (
                       <tr>
                         <td

@@ -26,7 +26,6 @@ public class DataExportServiceImpl implements DataExportService {
             throw new ExportException("No data to export");
         }
 
-        // SXSSFWorkbook streams rows (100 row memory buffer) avoiding heap explosion and GC pauses
         SXSSFWorkbook wb = new SXSSFWorkbook(100);
         wb.setCompressTempFiles(true);
 
@@ -53,7 +52,6 @@ public class DataExportServiceImpl implements DataExportService {
             throw new ExportException("No sheet data to export");
         }
 
-        // SXSSFWorkbook streams rows (100 row memory buffer)
         SXSSFWorkbook wb = new SXSSFWorkbook(100);
         wb.setCompressTempFiles(true);
 
@@ -128,7 +126,6 @@ public class DataExportServiceImpl implements DataExportService {
             }
         }
 
-        // Fast column sizing: sample the header and first 100 rows instead of scanning 68,900 rows
         int sampleLimit = rows != null ? Math.min(rows.size(), 100) : 0;
         for (int i = 0; i < headers.size(); i++) {
             int maxLen = headers.get(i).length();
@@ -185,8 +182,6 @@ public class DataExportServiceImpl implements DataExportService {
     private String escapeCsv(String value) {
         if (value == null) return "";
 
-        // Mitigate CSV Formula Injection (CWE-1236):
-        // If a cell begins with '=', '+', '-', '@', '\t', or '\r', escape it with a single quote prefix
         if (!value.isEmpty()) {
             char firstChar = value.charAt(0);
             if (firstChar == '=' || firstChar == '+' || firstChar == '-' || firstChar == '@'

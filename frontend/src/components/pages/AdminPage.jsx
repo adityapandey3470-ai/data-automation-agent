@@ -1,12 +1,14 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
-  getAdminUsers, getAdminStats, updateAdminUserStatus, updateAdminUserRole,
-  getAdminTickets, updateAdminTicketStatus, getAdminFiles, deleteAdminFile,
-  getAdminAuditLogs, getErrorMessage
+  getAdminUsers, getAdminStats, updateAdminUserStatus, updateAdminUserRole, deleteAdminUser,
+  getAdminTickets, updateAdminTicketStatus, deleteAdminTicket, getAdminFiles, deleteAdminFile,
+  getAdminAuditLogs, pruneAdminAuditLogs, getAdminAiMetrics, updateAdminUserSubscription,
+  resetAdminUserAiQuota, getErrorMessage
 } from '../../services/api';
 import {
   Shield, Users, Folder, CheckCircle, AlertCircle, RefreshCw, X,
-  Bug, Mail, Search, Filter, Trash2, Clock, ShieldCheck, FileSpreadsheet
+  Bug, Mail, Search, Filter, Trash2, Clock, ShieldCheck, FileSpreadsheet,
+  Sparkles, Cpu, Activity, Zap, Bot, Crown, Building2, Lock
 } from '../icons/Icons';
 
 export default function AdminPage({ currentUser }) {
@@ -25,6 +27,7 @@ export default function AdminPage({ currentUser }) {
   const [userSearch, setUserSearch] = useState('');
   const [userRoleFilter, setUserRoleFilter] = useState('ALL');
   const [userStatusFilter, setUserStatusFilter] = useState('ALL');
+  const [userPlanFilter, setUserPlanFilter] = useState('ALL');
 
   const [ticketSearch, setTicketSearch] = useState('');
   const [ticketStatusFilter, setTicketStatusFilter] = useState('ALL');
@@ -36,6 +39,11 @@ export default function AdminPage({ currentUser }) {
 
   const [auditSearch, setAuditSearch] = useState('');
 
+  const [aiMetrics, setAiMetrics] = useState(null);
+  const [aiSearch, setAiSearch] = useState('');
+  const [aiFeatureFilter, setAiFeatureFilter] = useState('ALL');
+  const [aiStatusFilter, setAiStatusFilter] = useState('ALL');
+
   const [confirmModal, setConfirmModal] = useState(null);
 
   const fetchData = useCallback(async () => {
@@ -43,18 +51,20 @@ export default function AdminPage({ currentUser }) {
     setLoading(true);
     setError(null);
     try {
-      const [usersRes, statsRes, ticketsRes, filesRes, auditRes] = await Promise.all([
+      const [usersRes, statsRes, ticketsRes, filesRes, auditRes, aiRes] = await Promise.all([
         getAdminUsers(),
         getAdminStats(),
         getAdminTickets().catch(() => ({ data: [] })),
         getAdminFiles().catch(() => ({ data: [] })),
-        getAdminAuditLogs().catch(() => ({ data: [] }))
+        getAdminAuditLogs().catch(() => ({ data: [] })),
+        getAdminAiMetrics().catch(() => ({ data: null }))
       ]);
       setUsers(usersRes.data || []);
       setStats(statsRes.data || null);
       setTickets(ticketsRes.data || []);
       setFiles(filesRes.data || []);
       setAuditLogs(auditRes.data || []);
+      setAiMetrics(aiRes.data || null);
     } catch (err) {
       setError(getErrorMessage(err, 'Failed to load administrator data'));
     } finally {
@@ -195,6 +205,156 @@ export default function AdminPage({ currentUser }) {
     });
   };
 
+  const handleDeleteUser = (user) => {
+    if (user.id === currentUser?.id) {
+      setError('You cannot delete your own administrator account.');
+      return;
+    }
+    setConfirmModal({
+      title: 'Permanently Delete User Account',
+      message: `Are you sure you want to permanently delete user '${user.name}' (${user.email})? All datasets, saved projects, active workbooks, and support tickets belonging to this user will be erased permanently.`,
+      confirmText: 'Delete User Account',
+      confirmClass: 'btn-outline',
+      confirmStyle: { color: '#ef4444', borderColor: '#ef4444' },
+      onConfirm: async () => {
+        setConfirmModal(null);
+        setActionLoading(`delete-user-${user.id}`);
+        setError(null);
+
+        const prevUsers = [...users];
+        setUsers(prev => prev.filter(u => u.id !== user.id));
+
+        try {
+          await deleteAdminUser(user.id);
+          setStats(prev => prev ? { ...prev, totalUsers: Math.max(0, prev.totalUsers - 1) } : prev);
+          setSuccess(`User account '${user.email}' and all associated datasets have been permanently deleted.`);
+          getAdminAuditLogs().then(r => setAuditLogs(r.data || [])).catch(() => {});
+        } catch (err) {
+          setUsers(prevUsers);
+          setError(getErrorMessage(err, 'Failed to delete user account'));
+        } finally {
+          setActionLoading(null);
+        }
+      }
+    });
+  };
+
+  const handleUpdateSubscription = (user, newTier) => {
+    setConfirmModal({
+      title: `Update Subscription to ${newTier}`,
+      message: `Change subscription tier for ${user.name} (${user.email}) to ${newTier}? Quota limit will automatically adjust.`,
+      confirmText: 'Change Plan',
+      confirmClass: 'btn-primary',
+      onConfirm: async () => {
+        setConfirmModal(null);
+        setActionLoading(`sub-${user.id}`);
+        setError(null);
+        setSuccess(null);
+
+        try {
+          const res = await updateAdminUserSubscription(user.id, newTier);
+          const updated = res.data;
+          setUsers(prev => prev.map(u => u.id === user.id ? { ...u, ...updated } : u));
+          if (currentUser?.id === user.id) {
+            window.dispatchEvent(new CustomEvent('tabufinery_user_updated', { detail: updated }));
+          }
+          setSuccess(`Subscription plan updated to ${newTier} for ${user.email}.`);
+          getAdminStats().then(r => setStats(r.data || null)).catch(() => {});
+          getAdminAuditLogs().then(r => setAuditLogs(r.data || [])).catch(() => {});
+        } catch (err) {
+          setError(getErrorMessage(err, 'Failed to update subscription'));
+        } finally {
+          setActionLoading(null);
+        }
+      }
+    });
+  };
+
+  const handleResetQuota = (user) => {
+    setConfirmModal({
+      title: 'Reset AI Query Quota',
+      message: `Reset AI usage counter back to 0 queries for ${user.name} (${user.email})? Current usage: ${user.aiQueriesUsed || 0} / ${user.aiQueriesLimit || 10}.`,
+      confirmText: 'Reset Quota',
+      confirmClass: 'btn-primary',
+      onConfirm: async () => {
+        setConfirmModal(null);
+        setActionLoading(`reset-${user.id}`);
+        setError(null);
+        setSuccess(null);
+
+        try {
+          const res = await resetAdminUserAiQuota(user.id);
+          const updated = res.data;
+          setUsers(prev => prev.map(u => u.id === user.id ? { ...u, ...updated } : u));
+          setSuccess(`AI query counter reset to 0 for ${user.email}.`);
+          getAdminAuditLogs().then(r => setAuditLogs(r.data || [])).catch(() => {});
+        } catch (err) {
+          setError(getErrorMessage(err, 'Failed to reset quota'));
+        } finally {
+          setActionLoading(null);
+        }
+      }
+    });
+  };
+
+  const handleDeleteTicket = (ticket) => {
+    setConfirmModal({
+      title: 'Permanently Delete Support Ticket',
+      message: `Are you sure you want to permanently delete ticket ${ticket.ticketCode} (${ticket.subject})? This entry will be erased from platform records.`,
+      confirmText: 'Delete Ticket',
+      confirmClass: 'btn-outline',
+      confirmStyle: { color: '#ef4444', borderColor: '#ef4444' },
+      onConfirm: async () => {
+        setConfirmModal(null);
+        setActionLoading(`delete-ticket-${ticket.id}`);
+        setError(null);
+
+        const prevTickets = [...tickets];
+        setTickets(prev => prev.filter(t => t.id !== ticket.id));
+        if (selectedTicket?.id === ticket.id) {
+          setSelectedTicket(null);
+        }
+
+        try {
+          await deleteAdminTicket(ticket.id);
+          setSuccess(`Support ticket ${ticket.ticketCode} has been permanently deleted.`);
+          getAdminAuditLogs().then(r => setAuditLogs(r.data || [])).catch(() => {});
+        } catch (err) {
+          setTickets(prevTickets);
+          setError(getErrorMessage(err, 'Failed to delete support ticket'));
+        } finally {
+          setActionLoading(null);
+        }
+      }
+    });
+  };
+
+  const handlePruneAuditLogs = (days) => {
+    const label = days > 0 ? `older than ${days} days` : 'all recorded records';
+    setConfirmModal({
+      title: 'Prune Security Audit Trail',
+      message: `Are you sure you want to permanently prune audit log entries ${label}? This administrative action will itself be recorded in the security audit trail.`,
+      confirmText: days > 0 ? 'Prune Audit Logs' : 'Clear All Logs',
+      confirmClass: 'btn-outline',
+      confirmStyle: { color: '#ef4444', borderColor: '#ef4444' },
+      onConfirm: async () => {
+        setConfirmModal(null);
+        setActionLoading('prune-audit');
+        setError(null);
+
+        try {
+          const res = await pruneAdminAuditLogs(days);
+          setSuccess(res.data?.message || 'Audit logs successfully pruned.');
+          getAdminAuditLogs().then(r => setAuditLogs(r.data || [])).catch(() => {});
+        } catch (err) {
+          setError(getErrorMessage(err, 'Failed to prune audit logs'));
+        } finally {
+          setActionLoading(null);
+        }
+      }
+    });
+  };
+
   const formatBytes = (bytes) => {
     if (!bytes || bytes === 0) return '0 B';
     const k = 1024;
@@ -208,7 +368,9 @@ export default function AdminPage({ currentUser }) {
     const matchesSearch = !q || (u.name && u.name.toLowerCase().includes(q)) || (u.email && u.email.toLowerCase().includes(q));
     const matchesRole = userRoleFilter === 'ALL' || u.role === userRoleFilter;
     const matchesStatus = userStatusFilter === 'ALL' || (userStatusFilter === 'ACTIVE' ? u.enabled : !u.enabled);
-    return matchesSearch && matchesRole && matchesStatus;
+    const tier = (u.subscriptionTier || 'FREE').toUpperCase();
+    const matchesPlan = userPlanFilter === 'ALL' || tier === userPlanFilter;
+    return matchesSearch && matchesRole && matchesStatus && matchesPlan;
   });
 
   const filteredTickets = tickets.filter(t => {
@@ -240,6 +402,18 @@ export default function AdminPage({ currentUser }) {
       (a.action && a.action.toLowerCase().includes(q)) ||
       (a.targetResource && a.targetResource.toLowerCase().includes(q)) ||
       (a.details && a.details.toLowerCase().includes(q));
+  });
+
+  const filteredAiLogs = (aiMetrics?.recentLogs || []).filter(l => {
+    const q = aiSearch.toLowerCase().trim();
+    const matchesSearch = !q ||
+      (l.userEmail && l.userEmail.toLowerCase().includes(q)) ||
+      (l.modelName && l.modelName.toLowerCase().includes(q)) ||
+      (l.queryPreview && l.queryPreview.toLowerCase().includes(q)) ||
+      (l.feature && l.feature.toLowerCase().includes(q));
+    const matchesFeature = aiFeatureFilter === 'ALL' || l.feature === aiFeatureFilter;
+    const matchesStatus = aiStatusFilter === 'ALL' || l.status === aiStatusFilter;
+    return matchesSearch && matchesFeature && matchesStatus;
   });
 
   if (currentUser?.role !== 'ROLE_ADMIN') {
@@ -291,23 +465,25 @@ export default function AdminPage({ currentUser }) {
           </div>
 
           <div className="admin-stat-card">
-            <div className="admin-stat-title">Active Users</div>
-            <div className="admin-stat-number" style={{ color: 'var(--emerald)' }}>{stats.activeUsers}</div>
-            <span className="admin-stat-sub">Unrestricted Access</span>
+            <div className="admin-stat-title">Subscribed Plans</div>
+            <div className="admin-stat-number" style={{ color: '#8b5cf6' }}>
+              {(stats.proUsers || 0) + (stats.enterpriseUsers || 0)} <span style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-secondary)' }}>/ {stats.totalUsers}</span>
+            </div>
+            <span className="admin-stat-sub">{stats.freeUsers || 0} Free · {stats.proUsers || 0} Pro · {stats.enterpriseUsers || 0} Enterprise</span>
+          </div>
+
+          <div className="admin-stat-card">
+            <div className="admin-stat-title">AI Tokens Tracked</div>
+            <div className="admin-stat-number" style={{ color: 'var(--emerald)' }}>
+              {stats.totalTokensTracked ? Number(stats.totalTokensTracked).toLocaleString() : '0'}
+            </div>
+            <span className="admin-stat-sub">{stats.totalAiQueriesUsed || 0} Queries Audited</span>
           </div>
 
           <div className="admin-stat-card">
             <div className="admin-stat-title">Active Datasets</div>
             <div className="admin-stat-number" style={{ color: '#3b82f6' }}>{files.length}</div>
             <span className="admin-stat-sub">Uploaded Files & Projects</span>
-          </div>
-
-          <div className="admin-stat-card">
-            <div className="admin-stat-title">Pending Reports</div>
-            <div className="admin-stat-number" style={{ color: tickets.filter(t => t.status === 'OPEN').length > 0 ? '#ef4444' : 'var(--emerald)' }}>
-              {tickets.filter(t => t.status === 'OPEN').length}
-            </div>
-            <span className="admin-stat-sub">Open Bug Reports</span>
           </div>
         </div>
       )}
@@ -336,6 +512,12 @@ export default function AdminPage({ currentUser }) {
           onClick={() => setActiveTab('audit')}
         >
           <ShieldCheck size={14} /> Security Audit Logs <span className="admin-tab-count">{auditLogs.length}</span>
+        </button>
+        <button
+          className={`admin-nav-tab ${activeTab === 'ai' ? 'active' : ''}`}
+          onClick={() => setActiveTab('ai')}
+        >
+          <Sparkles size={14} className="text-emerald" /> AI Usage & Metrics <span className="admin-tab-count">{aiMetrics?.totalRequests || 0}</span>
         </button>
       </div>
 
@@ -385,10 +567,21 @@ export default function AdminPage({ currentUser }) {
                   <option value="DISABLED">Disabled Only</option>
                 </select>
 
-                {(userSearch || userRoleFilter !== 'ALL' || userStatusFilter !== 'ALL') && (
+                <select
+                  className="admin-filter-select"
+                  value={userPlanFilter}
+                  onChange={(e) => setUserPlanFilter(e.target.value)}
+                >
+                  <option value="ALL">All Plans</option>
+                  <option value="FREE">Free Tier</option>
+                  <option value="PRO">Pro Plan</option>
+                  <option value="ENTERPRISE">Enterprise</option>
+                </select>
+
+                {(userSearch || userRoleFilter !== 'ALL' || userStatusFilter !== 'ALL' || userPlanFilter !== 'ALL') && (
                   <button
                     className="btn btn-xs btn-outline"
-                    onClick={() => { setUserSearch(''); setUserRoleFilter('ALL'); setUserStatusFilter('ALL'); }}
+                    onClick={() => { setUserSearch(''); setUserRoleFilter('ALL'); setUserStatusFilter('ALL'); setUserPlanFilter('ALL'); }}
                     title="Clear filters"
                   >
                     Reset
@@ -420,10 +613,12 @@ export default function AdminPage({ currentUser }) {
                 <thead>
                   <tr>
                     <th>User Details</th>
+                    <th>Plan</th>
+                    <th>AI Quota & Usage</th>
                     <th>Role</th>
-                    <th>Account Status</th>
+                    <th>Status</th>
                     <th style={{ textAlign: 'center' }}>Projects</th>
-                    <th>Joined Date</th>
+                    <th>Joined</th>
                     <th style={{ textAlign: 'right' }}>Actions</th>
                   </tr>
                 </thead>
@@ -433,6 +628,29 @@ export default function AdminPage({ currentUser }) {
                       <td>
                         <div style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{u.name}</div>
                         <div className="text-secondary" style={{ fontSize: 11 }}>{u.email}</div>
+                      </td>
+                      <td>
+                        {u.subscriptionTier === 'ENTERPRISE' ? (
+                          <span className="badge badge-emerald flex-gap" style={{ fontSize: 11, padding: '3px 8px' }}>
+                            <Building2 size={12} /> Enterprise
+                          </span>
+                        ) : u.subscriptionTier === 'PRO' ? (
+                          <span className="badge badge-indigo flex-gap" style={{ fontSize: 11, padding: '3px 8px' }}>
+                            <Crown size={12} /> Pro
+                          </span>
+                        ) : (
+                          <span className="badge badge-neutral flex-gap" style={{ fontSize: 11, padding: '3px 8px' }}>
+                            <Zap size={12} /> Free
+                          </span>
+                        )}
+                      </td>
+                      <td>
+                        <div style={{ fontSize: 12, fontWeight: 600 }}>
+                          {u.subscriptionTier === 'ENTERPRISE' ? 'Unlimited' : `${u.aiQueriesUsed || 0} / ${u.aiQueriesLimit || 10}`}
+                        </div>
+                        <div className="text-secondary" style={{ fontSize: 11 }}>
+                          {u.totalTokensUsed ? `${Number(u.totalTokensUsed).toLocaleString()} tokens` : '0 tokens'}
+                        </div>
                       </td>
                       <td>
                         <span className={`badge ${u.role === 'ROLE_ADMIN' ? 'admin-badge' : 'badge-neutral'}`}>
@@ -454,6 +672,29 @@ export default function AdminPage({ currentUser }) {
                       </td>
                       <td style={{ textAlign: 'right' }}>
                         <div className="admin-action-group">
+                          <select
+                            value={u.subscriptionTier || 'FREE'}
+                            onChange={(e) => handleUpdateSubscription(u, e.target.value)}
+                            disabled={actionLoading != null}
+                            title="Change subscription plan"
+                            style={{ fontSize: 11, padding: '3px 6px', borderRadius: 4, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text-primary)', cursor: 'pointer' }}
+                          >
+                            <option value="FREE">Plan: Free</option>
+                            <option value="PRO">Plan: Pro</option>
+                            <option value="ENTERPRISE">Plan: Enterprise</option>
+                          </select>
+
+                          {(u.aiQueriesUsed || 0) > 0 && (
+                            <button
+                              className="btn btn-xs btn-outline"
+                              onClick={() => handleResetQuota(u)}
+                              disabled={actionLoading != null}
+                              title="Reset AI query quota back to 0"
+                            >
+                              {actionLoading === `reset-${u.id}` ? <div className="spinner" /> : 'Reset Quota'}
+                            </button>
+                          )}
+
                           <button
                             className="btn btn-xs btn-outline"
                             onClick={() => handleToggleRole(u)}
@@ -478,6 +719,22 @@ export default function AdminPage({ currentUser }) {
                               <div className="spinner" />
                             ) : (
                               u.enabled ? 'Disable' : 'Enable'
+                            )}
+                          </button>
+
+                          <button
+                            className="btn btn-xs btn-outline"
+                            onClick={() => handleDeleteUser(u)}
+                            disabled={actionLoading != null || u.id === currentUser?.id}
+                            style={{ color: '#ef4444', borderColor: '#ef4444' }}
+                            title={u.id === currentUser?.id ? 'Cannot delete yourself' : 'Permanently delete user'}
+                          >
+                            {actionLoading === `delete-user-${u.id}` ? (
+                              <div className="spinner" />
+                            ) : (
+                              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                                <Trash2 size={12} /> Delete
+                              </span>
                             )}
                           </button>
                         </div>
@@ -617,12 +874,29 @@ export default function AdminPage({ currentUser }) {
                           {t.createdAt ? new Date(t.createdAt).toLocaleDateString() : 'N/A'}
                         </td>
                         <td style={{ textAlign: 'right' }}>
-                          <button
-                            className="btn btn-xs btn-outline"
-                            onClick={() => setSelectedTicket(t)}
-                          >
-                            Manage Ticket
-                          </button>
+                          <div className="admin-action-group" style={{ justifyContent: 'flex-end' }}>
+                            <button
+                              className="btn btn-xs btn-outline"
+                              onClick={() => setSelectedTicket(t)}
+                            >
+                              Manage
+                            </button>
+                            <button
+                              className="btn btn-xs btn-outline"
+                              onClick={() => handleDeleteTicket(t)}
+                              disabled={actionLoading === `delete-ticket-${t.id}`}
+                              style={{ color: '#ef4444', borderColor: '#ef4444' }}
+                              title="Permanently delete ticket"
+                            >
+                              {actionLoading === `delete-ticket-${t.id}` ? (
+                                <div className="spinner" />
+                              ) : (
+                                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                                  <Trash2 size={12} /> Delete
+                                </span>
+                              )}
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     );
@@ -765,9 +1039,34 @@ export default function AdminPage({ currentUser }) {
               </div>
             </div>
 
-            <span className="admin-counter-badge">
-              Showing {filteredAuditLogs.length} of {auditLogs.length} Audit Events
-            </span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <button
+                  type="button"
+                  className="btn btn-xs btn-outline"
+                  onClick={() => handlePruneAuditLogs(30)}
+                  disabled={actionLoading === 'prune-audit' || auditLogs.length === 0}
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: 5, minHeight: 30 }}
+                  title="Purge audit logs older than 30 days"
+                >
+                  <Trash2 size={12} /> Prune &gt;30d
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-xs btn-outline"
+                  onClick={() => handlePruneAuditLogs(0)}
+                  disabled={actionLoading === 'prune-audit' || auditLogs.length === 0}
+                  style={{ color: '#ef4444', borderColor: '#ef4444', display: 'inline-flex', alignItems: 'center', gap: 5, minHeight: 30 }}
+                  title="Clear all recorded test audit logs"
+                >
+                  <Trash2 size={12} /> Clear All
+                </button>
+              </div>
+
+              <span className="admin-counter-badge">
+                Showing {filteredAuditLogs.length} of {auditLogs.length} Audit Events
+              </span>
+            </div>
           </div>
 
           {loading ? (
@@ -822,6 +1121,226 @@ export default function AdminPage({ currentUser }) {
                         </td>
                         <td style={{ color: 'var(--text-primary)' }}>
                           {log.details}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {activeTab === 'ai' && (
+        <div className="card p-0">
+          <div style={{ padding: '20px', borderBottom: '1px solid var(--border)' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 14 }}>
+              <div className="admin-stat-card" style={{ margin: 0 }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                  <span className="admin-stat-title" style={{ margin: 0 }}>Total AI Invocations</span>
+                  <div style={{ width: 28, height: 28, borderRadius: 6, background: 'rgba(16, 185, 129, 0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <Sparkles size={15} className="text-emerald" />
+                  </div>
+                </div>
+                <div className="admin-stat-number" style={{ color: 'var(--emerald)' }}>
+                  {aiMetrics?.totalRequests || 0}
+                </div>
+                <div style={{ fontSize: 11.5, color: 'var(--text-secondary)', marginTop: 4 }}>
+                  Analyst: <strong>{aiMetrics?.analystRequests || 0}</strong> · Support: <strong>{aiMetrics?.supportRequests || 0}</strong>
+                </div>
+              </div>
+
+              <div className="admin-stat-card" style={{ margin: 0 }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                  <span className="admin-stat-title" style={{ margin: 0 }}>Tokens Consumed</span>
+                  <div style={{ width: 28, height: 28, borderRadius: 6, background: 'rgba(59, 130, 246, 0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <Cpu size={15} style={{ color: '#3b82f6' }} />
+                  </div>
+                </div>
+                <div className="admin-stat-number" style={{ color: '#3b82f6' }}>
+                  {(aiMetrics?.totalTokens || 0).toLocaleString()}
+                </div>
+                <div style={{ fontSize: 11.5, color: 'var(--text-secondary)', marginTop: 4 }}>
+                  In: <strong>{(aiMetrics?.promptTokens || 0).toLocaleString()}</strong> · Out: <strong>{(aiMetrics?.completionTokens || 0).toLocaleString()}</strong>
+                </div>
+              </div>
+
+              <div className="admin-stat-card" style={{ margin: 0 }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                  <span className="admin-stat-title" style={{ margin: 0 }}>Active LLM Engine</span>
+                  <div style={{ width: 28, height: 28, borderRadius: 6, background: 'rgba(99, 102, 241, 0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <Bot size={15} style={{ color: '#818cf8' }} />
+                  </div>
+                </div>
+                <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: 6, minHeight: 36 }}>
+                  <span style={{ width: 8, height: 8, borderRadius: '50%', background: aiMetrics?.apiConfigured ? 'var(--emerald)' : '#eab308', display: 'inline-block', flexShrink: 0 }} />
+                  <span style={{ fontFamily: 'monospace', fontSize: 14 }}>{aiMetrics?.activeModel || 'gemini-2.5-flash'}</span>
+                </div>
+                <div style={{ fontSize: 11.5, color: 'var(--text-secondary)', marginTop: 4 }}>
+                  {aiMetrics?.apiConfigured ? 'Gemini API Live' : 'Deterministic Mode'}
+                </div>
+              </div>
+
+              <div className="admin-stat-card" style={{ margin: 0 }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                  <span className="admin-stat-title" style={{ margin: 0 }}>Avg Response Speed</span>
+                  <div style={{ width: 28, height: 28, borderRadius: 6, background: 'rgba(234, 179, 8, 0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <Activity size={15} style={{ color: '#eab308' }} />
+                  </div>
+                </div>
+                <div className="admin-stat-number" style={{ color: '#eab308' }}>
+                  {aiMetrics?.averageLatencyMs || 0} <span style={{ fontSize: 14, fontWeight: 500 }}>ms</span>
+                </div>
+                <div style={{ fontSize: 11.5, color: 'var(--text-secondary)', marginTop: 4 }}>
+                  Success Rate: <strong>{aiMetrics?.totalRequests ? Math.round((aiMetrics.successCount / aiMetrics.totalRequests) * 100) : 100}%</strong>
+                </div>
+              </div>
+            </div>
+
+            <div style={{ marginTop: 16, padding: '14px 16px', background: 'var(--surface-secondary)', borderRadius: 10, border: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 14 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <div style={{ width: 32, height: 32, borderRadius: 8, background: 'rgba(16, 185, 129, 0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                  <Zap size={16} className="text-emerald" />
+                </div>
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>Google AI Studio Quotas & Protection</div>
+                  <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>Limit: 15 Requests/Min · 1,500 Requests/Day · Sliding Window Defense Active</div>
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: 18, flexWrap: 'wrap' }}>
+                <div>
+                  <span style={{ fontSize: 11, textTransform: 'uppercase', color: 'var(--text-tertiary)', fontWeight: 700 }}>Estimated Cost</span>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)' }}>
+                    ${(aiMetrics?.estimatedCostUsd || 0).toFixed(4)} <span style={{ fontSize: 11, fontWeight: 500, color: 'var(--emerald)' }}>(Free Tier: $0.00)</span>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  className="btn btn-xs btn-outline"
+                  onClick={fetchData}
+                  disabled={loading}
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minHeight: 32 }}
+                >
+                  <RefreshCw size={12} className={loading ? 'spin' : ''} /> Refresh
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div className="admin-toolbar">
+            <div className="admin-search-box">
+              <Search size={14} className="text-secondary" />
+              <input
+                type="text"
+                placeholder="Search by caller, query preview, model..."
+                value={aiSearch}
+                onChange={(e) => setAiSearch(e.target.value)}
+              />
+              {aiSearch && (
+                <button className="admin-search-clear" onClick={() => setAiSearch('')}>
+                  <X size={12} />
+                </button>
+              )}
+            </div>
+
+            <div className="admin-toolbar-controls">
+              <div className="admin-filter-group">
+                <Filter size={13} className="text-tertiary" />
+                <select
+                  value={aiFeatureFilter}
+                  onChange={(e) => setAiFeatureFilter(e.target.value)}
+                  className="admin-filter-select"
+                >
+                  <option value="ALL">All AI Features</option>
+                  <option value="AI_ANALYST">AI Data Analyst</option>
+                  <option value="SUPPORT_CHAT">Support Chatbot</option>
+                </select>
+
+                <select
+                  value={aiStatusFilter}
+                  onChange={(e) => setAiStatusFilter(e.target.value)}
+                  className="admin-filter-select"
+                >
+                  <option value="ALL">All Statuses</option>
+                  <option value="SUCCESS">Success (Live LLM)</option>
+                  <option value="FALLBACK">Fallback (Engine/KB)</option>
+                  <option value="ERROR">Error</option>
+                </select>
+              </div>
+
+              <span className="admin-counter-badge">
+                Showing {filteredAiLogs.length} of {aiMetrics?.recentLogs?.length || 0} events
+              </span>
+            </div>
+          </div>
+
+          {filteredAiLogs.length === 0 ? (
+            <div className="admin-empty-state">
+              <div className="admin-empty-icon">
+                <Sparkles size={22} />
+              </div>
+              <p className="admin-empty-text">
+                {aiSearch || aiFeatureFilter !== 'ALL' || aiStatusFilter !== 'ALL'
+                  ? 'No AI invocation records match your filter criteria.'
+                  : 'No AI requests logged yet. Invocations from AI Analyst or Support Chatbot will be tracked here in real-time.'}
+              </p>
+            </div>
+          ) : (
+            <div className="admin-table-container">
+              <table className="admin-table">
+                <thead>
+                  <tr>
+                    <th>Timestamp</th>
+                    <th>User / Session</th>
+                    <th>Feature</th>
+                    <th>Query Preview</th>
+                    <th>Model</th>
+                    <th>Tokens</th>
+                    <th>Latency</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredAiLogs.map((log) => {
+                    const isSuccess = log.status === 'SUCCESS';
+                    return (
+                      <tr key={log.id}>
+                        <td style={{ fontSize: 12, color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>
+                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7 }}>
+                            <Clock size={13} style={{ flexShrink: 0, opacity: 0.75 }} />
+                            <span>{log.createdAt ? new Date(log.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : 'N/A'}</span>
+                          </span>
+                        </td>
+                        <td style={{ fontWeight: 600, fontSize: 12.5 }}>
+                          {log.userEmail}
+                        </td>
+                        <td>
+                          <span className={`badge ${log.feature === 'AI_ANALYST' ? 'badge-primary' : 'badge-info'}`} style={{ fontSize: 10, fontWeight: 700 }}>
+                            {log.feature === 'AI_ANALYST' ? 'AI Analyst' : 'Support Chat'}
+                          </span>
+                        </td>
+                        <td style={{ maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 12.5, color: 'var(--text-primary)' }} title={log.queryPreview}>
+                          {log.queryPreview || '—'}
+                        </td>
+                        <td style={{ fontFamily: 'monospace', fontSize: 11.5, color: 'var(--text-secondary)' }}>
+                          {log.modelName}
+                        </td>
+                        <td style={{ fontSize: 12, fontWeight: 600 }}>
+                          {log.totalTokens > 0 ? (
+                            <span>{log.totalTokens} <span style={{ fontSize: 10, fontWeight: 400, color: 'var(--text-tertiary)' }}>({log.promptTokens}/{log.completionTokens})</span></span>
+                          ) : '—'}
+                        </td>
+                        <td style={{ fontSize: 12 }}>
+                          <span style={{ color: log.latencyMs < 1000 ? 'var(--emerald)' : log.latencyMs < 3000 ? '#eab308' : '#ef4444', fontWeight: 600 }}>
+                            {log.latencyMs}ms
+                          </span>
+                        </td>
+                        <td>
+                          <span className={`badge ${isSuccess ? 'badge-success' : 'badge-warning'}`} style={{ fontSize: 10, fontWeight: 700 }}>
+                            {log.status}
+                          </span>
                         </td>
                       </tr>
                     );
@@ -937,21 +1456,32 @@ export default function AdminPage({ currentUser }) {
               </div>
             </div>
 
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 12, paddingTop: 16, borderTop: '1px solid var(--border)' }}>
-              <a
-                href={`mailto:${selectedTicket.userEmail}?subject=Regarding ${selectedTicket.ticketCode}: ${selectedTicket.subject}`}
-                className="btn btn-sm btn-primary"
-                style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '8px 16px', fontSize: 13 }}
-              >
-                <Mail size={14} /> Reply via Email
-              </a>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, paddingTop: 16, borderTop: '1px solid var(--border)', flexWrap: 'wrap' }}>
               <button
+                type="button"
                 className="btn btn-sm btn-outline"
-                onClick={() => setSelectedTicket(null)}
-                style={{ padding: '8px 18px', fontSize: 13 }}
+                onClick={() => handleDeleteTicket(selectedTicket)}
+                style={{ color: '#ef4444', borderColor: '#ef4444', display: 'inline-flex', alignItems: 'center', gap: 6 }}
+                title="Permanently remove ticket"
               >
-                Close
+                <Trash2 size={13} /> Delete Ticket
               </button>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <a
+                  href={`mailto:${selectedTicket.userEmail}?subject=Regarding ${selectedTicket.ticketCode}: ${selectedTicket.subject}`}
+                  className="btn btn-sm btn-primary"
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '8px 16px', fontSize: 13 }}
+                >
+                  <Mail size={14} /> Reply via Email
+                </a>
+                <button
+                  className="btn btn-sm btn-outline"
+                  onClick={() => setSelectedTicket(null)}
+                  style={{ padding: '8px 18px', fontSize: 13 }}
+                >
+                  Close
+                </button>
+              </div>
             </div>
           </div>
         </div>

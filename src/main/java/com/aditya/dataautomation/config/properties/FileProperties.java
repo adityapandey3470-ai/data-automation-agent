@@ -11,5 +11,5 @@ import org.springframework.validation.annotation.Validated;
 public class FileProperties {
 
     @Min(value = 1024, message = "Maximum file size must be at least 1024 bytes")
-    private long maxSize = 10485760L; // 10MB
+    private long maxSize = 10485760L;
 }

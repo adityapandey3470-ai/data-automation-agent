@@ -27,7 +27,6 @@ public class GeminiClientService {
             GeminiProperties geminiProperties,
             ObjectMapper objectMapper) {
 
-        // Check environment variable fallback if property is empty
         String key = geminiProperties.getApiKey();
         if (key == null || key.isBlank()) {
             key = System.getenv("GEMINI_API_KEY");
@@ -213,7 +212,6 @@ public class GeminiClientService {
             });
         }
 
-        // Bounded sample: max 2 rows, max 100 chars per cell
         if (sampleRows != null && !sampleRows.isEmpty()) {
             sb.append("\nSAMPLE ROW SNIPPET (First 2 rows):\n");
             int rowIdx = 1;

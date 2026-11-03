@@ -12,7 +12,7 @@ import lombok.NoArgsConstructor;
 @AllArgsConstructor
 public class SaveProjectRequest {
 
-    private String projectId; // null for new project, populated for overwrite/update
+    private String projectId;
 
     @NotBlank(message = "Project name is required")
     private String name;

@@ -35,6 +35,26 @@ public class User {
     @Column(nullable = false)
     private boolean enabled = true;
 
+    @Builder.Default
+    @Column(name = "email_verified", nullable = false)
+    private boolean emailVerified = false;
+
+    @Builder.Default
+    @Column(name = "subscription_tier", nullable = false)
+    private String subscriptionTier = "FREE";
+
+    @Builder.Default
+    @Column(name = "ai_queries_used", nullable = false)
+    private Integer aiQueriesUsed = 0;
+
+    @Builder.Default
+    @Column(name = "ai_queries_limit", nullable = false)
+    private Integer aiQueriesLimit = 10;
+
+    @Builder.Default
+    @Column(name = "total_tokens_used", nullable = false)
+    private Long totalTokensUsed = 0L;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
 

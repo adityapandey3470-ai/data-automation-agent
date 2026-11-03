@@ -1,8 +1,10 @@
 package com.aditya.dataautomation.auth.service;
 
 import com.aditya.dataautomation.auth.dto.*;
+import com.aditya.dataautomation.auth.entity.EmailVerificationToken;
 import com.aditya.dataautomation.auth.entity.PasswordResetToken;
 import com.aditya.dataautomation.auth.entity.User;
+import com.aditya.dataautomation.auth.repository.EmailVerificationTokenRepository;
 import com.aditya.dataautomation.auth.repository.PasswordResetTokenRepository;
 import com.aditya.dataautomation.auth.repository.UserRepository;
 import com.aditya.dataautomation.config.properties.AuthProperties;
@@ -28,6 +30,7 @@ public class AuthService {
 
     private final UserRepository userRepository;
     private final PasswordResetTokenRepository passwordResetTokenRepository;
+    private final EmailVerificationTokenRepository emailVerificationTokenRepository;
     private final PasswordEncoder passwordEncoder;
     private final JwtService jwtService;
     private final EmailService emailService;
@@ -49,18 +52,44 @@ public class AuthService {
                 .email(email)
                 .passwordHash(passwordEncoder.encode(request.getPassword()))
                 .name(request.getName().trim())
-                .role("ROLE_USER") // Public signup is strictly standard user
+                .role("ROLE_USER")
                 .enabled(true)
+                .emailVerified(false)
                 .build();
 
         user = userRepository.save(user);
-        log.info("New user registered: id={}, email={}, role={}", user.getId(), user.getEmail(), user.getRole());
+        log.info("New user registered (pending email verification): id={}, email={}, role={}", user.getId(), user.getEmail(), user.getRole());
 
-        String token = jwtService.generateToken(user.getId(), user.getEmail(), user.getName(), user.getRole());
+        byte[] randomBytes = new byte[32];
+        secureRandom.nextBytes(randomBytes);
+        String rawToken = Base64.getUrlEncoder().withoutPadding().encodeToString(randomBytes);
+        String tokenHash = hashToken(rawToken);
+
+        EmailVerificationToken verificationToken = EmailVerificationToken.builder()
+                .user(user)
+                .tokenHash(tokenHash)
+                .expiresAt(LocalDateTime.now().plusHours(24))
+                .verified(false)
+                .build();
+        emailVerificationTokenRepository.save(verificationToken);
+
+        String verificationLink = authProperties.getFrontendUrl() + "/?verifyToken=" + rawToken;
+        boolean smtpConfigured = emailService.isSmtpConfigured();
+
+        if (smtpConfigured) {
+            emailService.sendVerificationEmail(user.getEmail(), user.getName(), verificationLink);
+        } else {
+            log.info("SMTP host not configured (app.mail.host). Local development verification link for {}: {}",
+                    user.getEmail(), verificationLink);
+        }
+
         return AuthResponse.builder()
-                .token(token)
+                .token(null)
                 .tokenType("Bearer")
                 .user(toDto(user))
+                .emailVerificationRequired(true)
+                .message("We sent a verification link to " + user.getEmail() + ". Please click the link to activate your account.")
+                .smtpConfigured(smtpConfigured)
                 .build();
     }
 
@@ -70,12 +99,16 @@ public class AuthService {
         User user = userRepository.findByEmailIgnoreCase(email)
                 .orElseThrow(() -> new InvalidRequestException("Invalid email or password"));
 
+        if (!passwordEncoder.matches(request.getPassword(), user.getPasswordHash())) {
+            throw new InvalidRequestException("Invalid email or password");
+        }
+
         if (!user.isEnabled()) {
             throw new InvalidRequestException("Account has been disabled by administrator. Please contact support.");
         }
 
-        if (!passwordEncoder.matches(request.getPassword(), user.getPasswordHash())) {
-            throw new InvalidRequestException("Invalid email or password");
+        if (!user.isEmailVerified()) {
+            throw new InvalidRequestException("Please verify your email address before logging in. Check your inbox for the activation link or click 'Resend Verification'.");
         }
 
         log.info("User logged in: id={}, email={}, role={}", user.getId(), user.getEmail(), user.getRole());
@@ -84,6 +117,100 @@ public class AuthService {
                 .token(token)
                 .tokenType("Bearer")
                 .user(toDto(user))
+                .emailVerificationRequired(false)
+                .build();
+    }
+
+    @Transactional
+    public AuthResponse verifyEmail(String rawToken) {
+        if (rawToken == null || rawToken.isBlank()) {
+            throw new InvalidRequestException("Verification token is required");
+        }
+
+        String tokenHash = hashToken(rawToken.trim());
+        EmailVerificationToken token = emailVerificationTokenRepository.findByTokenHash(tokenHash)
+                .orElseThrow(() -> new InvalidRequestException("Invalid or expired verification link. Please request a new verification email."));
+
+        if (token.isVerified()) {
+            User user = token.getUser();
+            String jwtToken = jwtService.generateToken(user.getId(), user.getEmail(), user.getName(), user.getRole());
+            return AuthResponse.builder()
+                    .token(jwtToken)
+                    .tokenType("Bearer")
+                    .user(toDto(user))
+                    .emailVerificationRequired(false)
+                    .message("Email is already verified. You are now logged in.")
+                    .build();
+        }
+
+        if (token.isExpired()) {
+            throw new InvalidRequestException("This verification link has expired. Please request a new verification link.");
+        }
+
+        User user = token.getUser();
+        user.setEmailVerified(true);
+        user.setEnabled(true);
+        userRepository.save(user);
+
+        token.setVerified(true);
+        emailVerificationTokenRepository.save(token);
+
+        log.info("Email verified successfully: user_id={}, email={}", user.getId(), user.getEmail());
+
+        String jwtToken = jwtService.generateToken(user.getId(), user.getEmail(), user.getName(), user.getRole());
+        return AuthResponse.builder()
+                .token(jwtToken)
+                .tokenType("Bearer")
+                .user(toDto(user))
+                .emailVerificationRequired(false)
+                .message("Your email has been successfully verified! Welcome to Tabufinery.")
+                .build();
+    }
+
+    @Transactional
+    public AuthResponse resendVerification(String emailStr) {
+        String email = emailStr.trim().toLowerCase();
+        Optional<User> userOpt = userRepository.findByEmailIgnoreCase(email);
+        boolean smtpConfigured = emailService.isSmtpConfigured();
+
+        if (userOpt.isPresent()) {
+            User user = userOpt.get();
+            if (user.isEmailVerified()) {
+                return AuthResponse.builder()
+                        .emailVerificationRequired(false)
+                        .message("This email address is already verified. You can log in directly.")
+                        .smtpConfigured(smtpConfigured)
+                        .build();
+            }
+
+            emailVerificationTokenRepository.deleteByUserId(user.getId());
+
+            byte[] randomBytes = new byte[32];
+            secureRandom.nextBytes(randomBytes);
+            String rawToken = Base64.getUrlEncoder().withoutPadding().encodeToString(randomBytes);
+            String tokenHash = hashToken(rawToken);
+
+            EmailVerificationToken token = EmailVerificationToken.builder()
+                    .user(user)
+                    .tokenHash(tokenHash)
+                    .expiresAt(LocalDateTime.now().plusHours(24))
+                    .verified(false)
+                    .build();
+            emailVerificationTokenRepository.save(token);
+
+            String verificationLink = authProperties.getFrontendUrl() + "/?verifyToken=" + rawToken;
+            if (smtpConfigured) {
+                emailService.sendVerificationEmail(user.getEmail(), user.getName(), verificationLink);
+            } else {
+                log.info("SMTP host not configured (app.mail.host). Verification link for {}: {}",
+                        user.getEmail(), verificationLink);
+            }
+        }
+
+        return AuthResponse.builder()
+                .emailVerificationRequired(true)
+                .message("If an unverified account exists with that email, a new verification link has been sent.")
+                .smtpConfigured(smtpConfigured)
                 .build();
     }
 
@@ -100,7 +227,6 @@ public class AuthService {
 
             passwordResetTokenRepository.deleteByUserId(user.getId());
 
-            // Generate cryptographically secure random reset token (256-bit entropy, URL-safe Base64)
             byte[] randomBytes = new byte[32];
             secureRandom.nextBytes(randomBytes);
             String rawToken = Base64.getUrlEncoder().withoutPadding().encodeToString(randomBytes);
@@ -120,7 +246,7 @@ public class AuthService {
             if (smtpConfigured) {
                 emailService.sendPasswordResetEmail(user.getEmail(), resetLink);
             } else if (authProperties.isExposeDevToken()) {
-                // Only exposed in designated non-production test environments
+
                 devResetToken = rawToken;
             }
         }
@@ -176,6 +302,11 @@ public class AuthService {
                 .name(user.getName())
                 .role(user.getRole())
                 .enabled(user.isEnabled())
+                .emailVerified(user.isEmailVerified())
+                .subscriptionTier(user.getSubscriptionTier() != null ? user.getSubscriptionTier() : "FREE")
+                .aiQueriesUsed(user.getAiQueriesUsed() != null ? user.getAiQueriesUsed() : 0)
+                .aiQueriesLimit(user.getAiQueriesLimit() != null ? user.getAiQueriesLimit() : 10)
+                .totalTokensUsed(user.getTotalTokensUsed() != null ? user.getTotalTokensUsed() : 0L)
                 .createdAt(user.getCreatedAt())
                 .build();
     }

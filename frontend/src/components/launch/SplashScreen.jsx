@@ -8,7 +8,7 @@ export default function SplashScreen({ onFinish, theme }) {
   useEffect(() => {
     const timer = setTimeout(() => {
       setFading(true);
-      setTimeout(onFinish, 400); // Wait for fade-out transition
+      setTimeout(onFinish, 400);
     }, 1100);
 
     return () => clearTimeout(timer);

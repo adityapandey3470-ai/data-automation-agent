@@ -19,15 +19,11 @@ public class AnalysisResult {
     private final int totalRows;
     private final int resultRows;
 
-
     private final List<Map<String, Object>> rows;
-
 
     private final ColumnStatistics statistics;
 
-
     private final GroupResult groupResult;
-
 
     private final Object value;
 }

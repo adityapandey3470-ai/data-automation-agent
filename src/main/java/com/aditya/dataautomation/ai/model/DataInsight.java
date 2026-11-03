@@ -15,8 +15,8 @@ public class DataInsight {
 
     private String id;
     private String title;
-    private String category; // QUALITY, DISTRIBUTION, OUTLIER, ANOMALY, CORRELATION
-    private String severity; // INFO, WARNING, SUCCESS
+    private String category;
+    private String severity;
     private String statisticalFact;
     private String interpretation;
     private String affectedColumn;

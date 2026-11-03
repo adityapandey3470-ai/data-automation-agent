@@ -4,10 +4,6 @@ import java.math.BigDecimal;
 import java.util.List;
 import java.util.Map;
 
-/**
- * Utility for generating collision-resistant row fingerprints.
- * Eliminates delimiter collisions and distinguishes actual nulls from string "null".
- */
 public final class RowFingerprintUtil {
 
     private RowFingerprintUtil() {}

@@ -118,9 +118,6 @@ public class ExcelFileServiceImpl implements ExcelFileService {
         }
     }
 
-    /**
-     * Parses a POI sheet into the internal model, reading ALL data rows.
-     */
     private ExcelSheetData parseSheetData(Sheet sheet) {
         List<String> headers = detectHeaders(sheet);
         List<Map<String, Object>> allRows = readAllDataRows(sheet, headers);
@@ -132,9 +129,6 @@ public class ExcelFileServiceImpl implements ExcelFileService {
                 .build();
     }
 
-    /**
-     * Reads all non-blank data rows (no preview limit).
-     */
     private List<Map<String, Object>> readAllDataRows(Sheet sheet, List<String> headers) {
         List<Map<String, Object>> rows = new ArrayList<>();
         if (headers.isEmpty()) {
@@ -171,7 +165,6 @@ public class ExcelFileServiceImpl implements ExcelFileService {
         return rows;
     }
 
-
     private void validateFile(MultipartFile file) {
         if (file == null || file.isEmpty()) {
             throw new InvalidExcelFileException("No file provided or file is empty");
@@ -189,7 +182,6 @@ public class ExcelFileServiceImpl implements ExcelFileService {
                     "Only .xlsx files are supported. Received: " + originalFilename);
         }
 
-        // Defend against path traversal and null byte injections in file names
         if (originalFilename.contains("..") || originalFilename.contains("/") || originalFilename.contains("\\") || originalFilename.contains("\0")) {
             throw new InvalidExcelFileException("Invalid file name. Path traversal characters are not permitted.");
         }
@@ -203,7 +195,6 @@ public class ExcelFileServiceImpl implements ExcelFileService {
                     "Unsupported content type: " + contentType + ". Expected an .xlsx file.");
         }
 
-        // Magic bytes validation: Verify ZIP signature (0x50, 0x4B = PK) for OOXML (.xlsx)
         try (InputStream is = file.getInputStream()) {
             byte[] header = is.readNBytes(4);
             if (header.length < 4 || header[0] != 0x50 || header[1] != 0x4B) {
@@ -213,7 +204,6 @@ public class ExcelFileServiceImpl implements ExcelFileService {
             throw new InvalidExcelFileException("Failed to verify file integrity.", e);
         }
     }
-
 
     private ExcelSheetResponse processSheet(Sheet sheet) {
         List<String> headers = detectHeaders(sheet);
@@ -286,7 +276,6 @@ public class ExcelFileServiceImpl implements ExcelFileService {
         return normalized;
     }
 
-
     private int calculateDataRowCount(Sheet sheet) {
         Row headerRow = findFirstNonEmptyRow(sheet);
         if (headerRow == null) {
@@ -304,7 +293,6 @@ public class ExcelFileServiceImpl implements ExcelFileService {
         }
         return count;
     }
-
 
     private List<Map<String, Object>> readPreviewRows(Sheet sheet, List<String> headers) {
         List<Map<String, Object>> rows = new ArrayList<>();
@@ -338,7 +326,6 @@ public class ExcelFileServiceImpl implements ExcelFileService {
 
         return rows;
     }
-
 
     private Object getCellValue(Cell cell) {
         if (cell == null) {

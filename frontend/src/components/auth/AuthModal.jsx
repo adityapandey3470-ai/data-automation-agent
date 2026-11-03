@@ -1,9 +1,15 @@
-import React, { useState, useEffect } from 'react';
-import { signupUser, loginUser, forgotPassword, resetPassword, setStoredAuth, getErrorMessage } from '../../services/api';
-import { LogoMark, Shield, X, AlertCircle, CheckCircle, Zap, Eye, EyeOff } from '../icons/Icons';
+import React, { useState, useEffect, useCallback } from 'react';
+import {
+  signupUser, loginUser, forgotPassword, resetPassword,
+  verifyEmail, resendVerification, setStoredAuth, getErrorMessage
+} from '../../services/api';
+import {
+  LogoMark, Shield, X, AlertCircle, CheckCircle, Zap,
+  Eye, EyeOff, MailCheck, RefreshCw, Mail
+} from '../icons/Icons';
 
 export default function AuthModal({ isOpen, onClose, onAuthSuccess, initialMode = 'login', forced = false }) {
-  const [mode, setMode] = useState(initialMode); // 'login' | 'signup' | 'forgot' | 'reset'
+  const [mode, setMode] = useState(initialMode);
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -11,28 +17,87 @@ export default function AuthModal({ isOpen, onClose, onAuthSuccess, initialMode 
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [resetToken, setResetToken] = useState('');
+  const [verifyToken, setVerifyToken] = useState('');
+  const [registeredEmail, setRegisteredEmail] = useState('');
+  const [verificationNotice, setVerificationNotice] = useState(null);
+
   const [loading, setLoading] = useState(false);
+  const [resendLoading, setResendLoading] = useState(false);
+  const [resendCooldown, setResendCooldown] = useState(0);
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
   const [smtpNotice, setSmtpNotice] = useState(null);
 
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const urlToken = params.get('resetToken');
-    if (urlToken) {
-      setResetToken(urlToken);
-      setMode('reset');
+  const executeVerification = useCallback(async (tokenStr) => {
+    if (!tokenStr) return;
+    setLoading(true);
+    setError(null);
+    setSuccess(null);
+    setMode('verifying');
+
+    try {
+      const res = await verifyEmail(tokenStr.trim());
+      const { token: jwtToken, user, message } = res.data;
+      if (jwtToken && user) {
+        setStoredAuth(jwtToken, user);
+      }
+      setSuccess(message || 'Email successfully verified! Welcome to Tabufinery.');
+      setMode('verify-success');
+
+      if (typeof window !== 'undefined' && window.history?.replaceState) {
+        const cleanUrl = window.location.pathname + window.location.hash;
+        window.history.replaceState({}, document.title, cleanUrl);
+      }
+
+      setTimeout(() => {
+        if (user && onAuthSuccess) {
+          onAuthSuccess(user);
+        }
+        if (onClose) onClose();
+      }, 1600);
+    } catch (err) {
+      setError(getErrorMessage(err, 'Failed to verify email. The activation link may be invalid or expired.'));
+      setMode('verify-failed');
+    } finally {
+      setLoading(false);
     }
-  }, []);
+  }, [onAuthSuccess, onClose]);
 
   useEffect(() => {
-    setMode(initialMode);
+    if (typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    const urlResetToken = params.get('resetToken');
+    if (urlResetToken) {
+      setResetToken(urlResetToken);
+      setMode('reset');
+      return;
+    }
+
+    const urlVerifyToken = params.get('verifyToken');
+    if (urlVerifyToken) {
+      setVerifyToken(urlVerifyToken);
+      executeVerification(urlVerifyToken);
+    }
+  }, [executeVerification]);
+
+  useEffect(() => {
+    if (mode !== 'verifying' && mode !== 'verify-success') {
+      setMode(initialMode);
+    }
     setError(null);
     setSuccess(null);
     setSmtpNotice(null);
     setShowPassword(false);
     setShowConfirmPassword(false);
   }, [initialMode, isOpen]);
+
+  useEffect(() => {
+    if (resendCooldown <= 0) return;
+    const timer = setInterval(() => {
+      setResendCooldown((prev) => Math.max(0, prev - 1));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [resendCooldown]);
 
   if (!isOpen) return null;
 
@@ -53,7 +118,12 @@ export default function AuthModal({ isOpen, onClose, onAuthSuccess, initialMode 
         if (onClose) onClose();
       }, 500);
     } catch (err) {
-      setError(getErrorMessage(err, 'Login failed. Please check your credentials and try again.'));
+      const msg = getErrorMessage(err, 'Login failed. Please check your credentials and try again.');
+      setError(msg);
+
+      if (msg.toLowerCase().includes('verify your email')) {
+        setRegisteredEmail(email.trim());
+      }
     } finally {
       setLoading(false);
     }
@@ -80,18 +150,46 @@ export default function AuthModal({ isOpen, onClose, onAuthSuccess, initialMode 
     setLoading(true);
     try {
       const res = await signupUser(name.trim(), email.trim(), password, confirmPassword);
-      const { token, user } = res.data;
-      setStoredAuth(token, user);
-      setSuccess(`Account created successfully! Welcome to Tabufinery, ${user.name}.`);
-
-      setTimeout(() => {
-        onAuthSuccess(user);
-        if (onClose) onClose();
-      }, 600);
+      if (res.data?.emailVerificationRequired) {
+        setRegisteredEmail(email.trim());
+        setVerificationNotice({
+          message: res.data.message || 'Please verify your email address to activate your account.',
+          smtpConfigured: res.data.smtpConfigured
+        });
+        setMode('verify-pending');
+      } else {
+        const { token, user } = res.data;
+        if (token) setStoredAuth(token, user);
+        setSuccess(`Account created successfully! Welcome to Tabufinery, ${user?.name || ''}.`);
+        setTimeout(() => {
+          if (user) onAuthSuccess(user);
+          if (onClose) onClose();
+        }, 600);
+      }
     } catch (err) {
       setError(getErrorMessage(err, 'Signup failed. Please try again.'));
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleResend = async (targetEmail) => {
+    const emailToUse = targetEmail || registeredEmail || email;
+    if (!emailToUse || !emailToUse.trim()) {
+      setError('Please provide an email address.');
+      return;
+    }
+
+    setResendLoading(true);
+    setError(null);
+    try {
+      const res = await resendVerification(emailToUse.trim());
+      setSuccess(res.data.message || 'A new verification link has been sent to your email.');
+      setResendCooldown(60);
+    } catch (err) {
+      setError(getErrorMessage(err, 'Failed to resend verification email. Please try again.'));
+    } finally {
+      setResendLoading(false);
     }
   };
 
@@ -160,7 +258,7 @@ export default function AuthModal({ isOpen, onClose, onAuthSuccess, initialMode 
 
   return (
     <div className="auth-overlay">
-      <div className="auth-card">
+      <div className="auth-card" style={{ maxWidth: 460 }}>
         {!forced && onClose && (
           <button
             className="modal-close-btn btn-icon"
@@ -180,9 +278,18 @@ export default function AuthModal({ isOpen, onClose, onAuthSuccess, initialMode 
             {mode === 'signup' && 'Create Your Account'}
             {mode === 'forgot' && 'Reset Your Password'}
             {mode === 'reset' && 'Set New Password'}
+            {mode === 'verify-pending' && 'Verify Your Email'}
+            {mode === 'verifying' && 'Verifying Email'}
+            {mode === 'verify-success' && 'Account Activated'}
+            {mode === 'verify-failed' && 'Verification Required'}
+            {mode === 'resend-verify' && 'Resend Verification'}
           </h2>
           <p className="auth-subtitle">
-            {forced
+            {mode === 'verify-pending'
+              ? 'A confirmation link has been dispatched to your mailbox.'
+              : mode === 'verifying'
+              ? 'Validating single-use cryptographic verification token...'
+              : forced
               ? 'Authentication is required to access data automation tools and workspaces.'
               : 'Enterprise data refinery, AI analytics, and multi-tenant persistence.'}
           </p>
@@ -191,7 +298,23 @@ export default function AuthModal({ isOpen, onClose, onAuthSuccess, initialMode 
         {error && (
           <div className="alert alert-error mb-16 flex-gap" style={{ alignItems: 'flex-start' }}>
             <AlertCircle size={15} style={{ flexShrink: 0, marginTop: 2 }} />
-            <span style={{ fontSize: 12 }}>{error}</span>
+            <div style={{ fontSize: 12, flex: 1 }}>
+              <div>{error}</div>
+              {error.toLowerCase().includes('verify your email') && (
+                <button
+                  type="button"
+                  className="auth-link mt-4"
+                  style={{ display: 'inline-block', fontWeight: 600, color: 'var(--emerald)' }}
+                  onClick={() => {
+                    setError(null);
+                    setRegisteredEmail(email.trim());
+                    setMode('resend-verify');
+                  }}
+                >
+                  Resend verification link &rarr;
+                </button>
+              )}
+            </div>
           </div>
         )}
 
@@ -210,7 +333,6 @@ export default function AuthModal({ isOpen, onClose, onAuthSuccess, initialMode 
           </div>
         )}
 
-        {/* SMTP Configuration Notice (Clear SaaS compliance) */}
         {smtpNotice && (
           <div
             className="card p-12 mb-16"
@@ -450,6 +572,199 @@ export default function AuthModal({ isOpen, onClose, onAuthSuccess, initialMode 
             >
               {loading ? <div className="spinner" /> : 'Create Free Account'}
             </button>
+          </form>
+        )}
+
+        {mode === 'verify-pending' && (
+          <div style={{ textAlign: 'center', padding: '12px 4px' }}>
+            <div style={{
+              width: 64,
+              height: 64,
+              borderRadius: '50%',
+              background: 'rgba(16, 185, 129, 0.12)',
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              marginBottom: 16,
+              border: '1px solid rgba(16, 185, 129, 0.25)'
+            }}>
+              <MailCheck size={32} className="text-emerald" />
+            </div>
+
+            <h3 style={{ fontSize: 18, fontWeight: 700, margin: '0 0 8px 0', color: 'var(--text-primary)' }}>
+              Check your inbox
+            </h3>
+            <p style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.6, margin: '0 0 16px 0' }}>
+              We've dispatched an account activation link to:
+            </p>
+
+            <div style={{
+              fontFamily: 'monospace',
+              fontSize: 13,
+              fontWeight: 600,
+              padding: '10px 14px',
+              background: 'var(--surface-secondary)',
+              border: '1px solid var(--border)',
+              borderRadius: 8,
+              color: 'var(--text-primary)',
+              wordBreak: 'break-all',
+              marginBottom: 16
+            }}>
+              {registeredEmail || email}
+            </div>
+
+            <p style={{ fontSize: 12, color: 'var(--text-tertiary)', lineHeight: 1.5, margin: '0 0 20px 0' }}>
+              Click the link inside the email to verify your address and activate your account. If you don't see the email within 2 minutes, check your spam or junk folder.
+            </p>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <button
+                type="button"
+                className="btn btn-outline w-full flex-gap justify-center"
+                onClick={() => handleResend(registeredEmail)}
+                disabled={resendLoading || resendCooldown > 0}
+                style={{ minHeight: 38 }}
+              >
+                <RefreshCw size={13} className={resendLoading ? 'spin' : ''} />
+                {resendLoading
+                  ? 'Sending Link...'
+                  : resendCooldown > 0
+                  ? `Resend available in ${resendCooldown}s`
+                  : 'Resend Verification Email'}
+              </button>
+
+              <button
+                type="button"
+                className="auth-link mt-8"
+                onClick={() => { setMode('login'); setError(null); }}
+              >
+                &larr; Back to Sign In
+              </button>
+            </div>
+          </div>
+        )}
+
+        {mode === 'verifying' && (
+          <div style={{ textAlign: 'center', padding: '36px 12px' }}>
+            <div className="spinner" style={{ width: 36, height: 36, margin: '0 auto 18px auto', borderWidth: 3 }} />
+            <h3 style={{ fontSize: 17, fontWeight: 700, margin: '0 0 8px 0' }}>
+              Verifying your email address...
+            </h3>
+            <p style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
+              Confirming account credentials and establishing secure session.
+            </p>
+          </div>
+        )}
+
+        {mode === 'verify-success' && (
+          <div style={{ textAlign: 'center', padding: '24px 12px' }}>
+            <div style={{
+              width: 64,
+              height: 64,
+              borderRadius: '50%',
+              background: 'rgba(16, 185, 129, 0.15)',
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              marginBottom: 16
+            }}>
+              <CheckCircle size={34} className="text-emerald" />
+            </div>
+            <h3 style={{ fontSize: 18, fontWeight: 700, margin: '0 0 8px 0', color: 'var(--emerald)' }}>
+              Email Successfully Verified!
+            </h3>
+            <p style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.5, margin: '0 0 20px 0' }}>
+              Your account is now activated. Launching your data automation workspace...
+            </p>
+            <div className="spinner" style={{ margin: '0 auto' }} />
+          </div>
+        )}
+
+        {mode === 'verify-failed' && (
+          <div style={{ textAlign: 'center', padding: '16px 8px' }}>
+            <div style={{
+              width: 58,
+              height: 58,
+              borderRadius: '50%',
+              background: 'rgba(239, 68, 68, 0.12)',
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              marginBottom: 14
+            }}>
+              <AlertCircle size={30} style={{ color: '#ef4444' }} />
+            </div>
+            <h3 style={{ fontSize: 17, fontWeight: 700, margin: '0 0 8px 0', color: 'var(--text-primary)' }}>
+              Verification Link Invalid or Expired
+            </h3>
+            <p style={{ fontSize: 12.5, color: 'var(--text-secondary)', lineHeight: 1.5, margin: '0 0 20px 0' }}>
+              Verification links expire after 24 hours. Request a new link below to activate your account.
+            </p>
+
+            <button
+              type="button"
+              className="btn btn-primary w-full"
+              onClick={() => { setMode('resend-verify'); setError(null); }}
+            >
+              Request New Verification Link
+            </button>
+
+            <button
+              type="button"
+              className="auth-link mt-14"
+              onClick={() => { setMode('login'); setError(null); }}
+            >
+              &larr; Back to Sign In
+            </button>
+          </div>
+        )}
+
+        {mode === 'resend-verify' && (
+          <form onSubmit={(e) => { e.preventDefault(); handleResend(registeredEmail || email); }}>
+            <p className="text-secondary mb-16" style={{ fontSize: 13, lineHeight: 1.5 }}>
+              Enter your registered email address and we will dispatch a new account activation link.
+            </p>
+
+            <div className="auth-form-group">
+              <label htmlFor="resend-email">Email Address</label>
+              <input
+                id="resend-email"
+                name="email"
+                type="email"
+                className="input-field"
+                placeholder="name@company.com"
+                value={registeredEmail || email}
+                onChange={(e) => {
+                  setRegisteredEmail(e.target.value);
+                  setEmail(e.target.value);
+                }}
+                required
+                disabled={resendLoading}
+                autoFocus
+              />
+            </div>
+
+            <button
+              type="submit"
+              className="btn btn-primary auth-btn-primary"
+              disabled={resendLoading || resendCooldown > 0}
+            >
+              {resendLoading
+                ? <div className="spinner" />
+                : resendCooldown > 0
+                ? `Wait ${resendCooldown}s`
+                : 'Send Activation Link'}
+            </button>
+
+            <div className="auth-footer-links">
+              <button
+                type="button"
+                className="auth-link"
+                onClick={() => { setMode('login'); setError(null); }}
+              >
+                &larr; Back to Sign In
+              </button>
+            </div>
           </form>
         )}
 

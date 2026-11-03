@@ -1,7 +1,4 @@
-/**
- * Formats a metric or KPI number for executive dashboard display.
- * Uses compact notation for large numbers (K, M, B) while preserving readability.
- */
+
 export function formatMetricNumber(val, maxDecimals = 2) {
   if (val == null || val === '') return '—';
   const num = typeof val === 'number' ? val : Number(val);
@@ -44,10 +41,6 @@ export function formatMetricNumber(val, maxDecimals = 2) {
   });
 }
 
-/**
- * Returns the exact numeric string formatted with standard locale thousands separators.
- * Used for tooltips and hover inspections.
- */
 export function formatExactNumber(val) {
   if (val == null || val === '') return '—';
   const num = typeof val === 'number' ? val : Number(val);

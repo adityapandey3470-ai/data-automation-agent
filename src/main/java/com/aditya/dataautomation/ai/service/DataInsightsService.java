@@ -35,7 +35,6 @@ public class DataInsightsService {
         long totalCells = (long) totalRows * totalColumns;
         List<String> headers = sheet.getHeaders() != null ? sheet.getHeaders() : Collections.emptyList();
 
-        // Fast In-Memory Cache Lookup (0ms return on repeat visits)
         String cacheKey = sheet.getSheetName() + "#" + totalRows + "#" + totalColumns + "#"
                 + (sheet.getRows() != null ? System.identityHashCode(sheet.getRows()) : 0);
         DataProfileResponse cached = profileCache.get(cacheKey);
@@ -43,7 +42,6 @@ public class DataInsightsService {
             return cached;
         }
 
-        // 1. Column Statistics (Parallel header processing for fast multicore execution)
         Map<String, ColumnStatistics> statsMap = new ConcurrentHashMap<>();
         headers.parallelStream().forEach(col -> {
             try {
@@ -56,7 +54,6 @@ public class DataInsightsService {
             }
         });
 
-        // Preserve header order in LinkedHashMap and compute total missing cells
         Map<String, ColumnStatistics> orderedStatsMap = new LinkedHashMap<>();
         long totalMissingCells = 0;
         for (String col : headers) {
@@ -67,7 +64,6 @@ public class DataInsightsService {
             }
         }
 
-        // 2. Duplicate detection (Unified collision-resistant row hashing across all dataset sizes)
         int duplicateCount = 0;
         try {
             if (sheet.getRows() != null && headers != null && !headers.isEmpty()) {
@@ -95,13 +91,10 @@ public class DataInsightsService {
                 .setScale(1, RoundingMode.HALF_UP).doubleValue()
                 : 100.0;
 
-        // 3. Generate structured DataInsights (Facts vs Potential Interpretations)
         List<DataInsight> insights = generateInsights(sheet, orderedStatsMap, duplicateCount, duplicatePct, completeness, totalMissingCells);
 
-        // 4. Generate intelligent analytical questions
         List<String> suggestedQuestions = generateSuggestedQuestions(headers, orderedStatsMap, duplicateCount);
 
-        // 5. Generate comprehensive Data Quality Report
         DataQualityReport qualityReport = calculateQualityReport(sheet, orderedStatsMap, duplicateCount, duplicatePct, completeness, totalMissingCells);
 
         DataProfileResponse response = DataProfileResponse.builder()
@@ -120,7 +113,6 @@ public class DataInsightsService {
                 .suggestedQuestions(suggestedQuestions)
                 .build();
 
-        // Evict if cache grows too large and store
         if (profileCache.size() > 25) {
             profileCache.clear();
         }
@@ -141,7 +133,6 @@ public class DataInsightsService {
         int idSeq = 1;
         int totalRows = sheet.getRowCount();
 
-        // Insight A: Dataset Completeness / Quality
         if (completeness < 95.0) {
             list.add(DataInsight.builder()
                     .id("INS-" + idSeq++)
@@ -166,7 +157,6 @@ public class DataInsightsService {
                     .build());
         }
 
-        // Insight B: Duplicate Rows
         if (duplicateCount > 0) {
             list.add(DataInsight.builder()
                     .id("INS-" + idSeq++)
@@ -181,12 +171,10 @@ public class DataInsightsService {
                     .build());
         }
 
-        // Insight C: Column-level profiling (Outliers, Distributions, Cardinality)
         for (Map.Entry<String, ColumnStatistics> entry : statsMap.entrySet()) {
             String col = entry.getKey();
             ColumnStatistics stats = entry.getValue();
 
-            // Null checks per column
             if (stats.getNullCount() > 0 && totalRows > 0) {
                 double colNullPct = (double) stats.getNullCount() / totalRows * 100.0;
                 if (colNullPct > 20.0) {
@@ -205,12 +193,10 @@ public class DataInsightsService {
                 }
             }
 
-            // Numeric Outliers & Range Analysis
             if ("NUMERIC".equalsIgnoreCase(stats.getDataType()) && stats.getCount() >= 4) {
                 analyzeNumericColumn(col, stats, sheet, list, idSeq);
             }
 
-            // Categorical Dominance / High Imbalance
             if ("STRING".equalsIgnoreCase(stats.getDataType()) && stats.getTopValues() != null && !stats.getTopValues().isEmpty()) {
                 Map.Entry<String, Long> top = stats.getTopValues().get(0);
                 if (stats.getCount() > 0) {
@@ -250,7 +236,6 @@ public class DataInsightsService {
             double mean = stats.getAverage() != null ? ((Number) stats.getAverage()).doubleValue() : 0.0;
             if (Double.isNaN(mean) || Double.isInfinite(mean)) return;
 
-            // Guard: If min == max, all values are identical (zero variance, no outliers)
             if (stats.getMin() != null && stats.getMax() != null) {
                 double minVal = ((Number) stats.getMin()).doubleValue();
                 double maxVal = ((Number) stats.getMax()).doubleValue();
@@ -263,7 +248,6 @@ public class DataInsightsService {
             int sampleLimit = Math.min(rowCount, 3000);
             int stride = Math.max(1, rowCount / sampleLimit);
 
-            // Compute standard deviation (using fast sample stride for large datasets)
             double varianceSum = 0.0;
             int count = 0;
             for (int i = 0; i < rowCount && count < sampleLimit; i += stride) {
@@ -291,7 +275,7 @@ public class DataInsightsService {
                     }
                 }
             } else {
-                // High-performance representative sampling for 10k+ row datasets
+
                 int sampleOutliers = 0;
                 int validSample = 0;
                 for (int i = 0; i < rowCount && validSample < sampleLimit; i += stride) {
@@ -342,7 +326,6 @@ public class DataInsightsService {
             questions.add("How many duplicate rows exist and should they be removed?");
         }
 
-        // Find primary numeric and categorical columns
         String primaryNumeric = null;
         String primaryCategorical = null;
 
@@ -382,7 +365,6 @@ public class DataInsightsService {
         int issueSeq = 1;
         int totalRows = sheet.getRowCount();
 
-        // 1. Completeness Score (0-100)
         int completenessScore = (int) Math.round(completeness);
         for (Map.Entry<String, ColumnStatistics> entry : statsMap.entrySet()) {
             long nulls = entry.getValue().getNullCount();
@@ -404,7 +386,6 @@ public class DataInsightsService {
             }
         }
 
-        // 2. Uniqueness Score (0-100)
         int uniquenessScore = Math.max(0, 100 - (int) Math.round(duplicatePct * 2.5));
         if (duplicateCount > 0) {
             String severity = duplicatePct > 10 || duplicateCount > 20 ? "HIGH" : "MEDIUM";
@@ -422,7 +403,6 @@ public class DataInsightsService {
                     .build());
         }
 
-        // 3. Consistency Score (0-100)
         int untrimmedCountTotal = 0;
         int consistencyDeductions = 0;
         if (sheet.getRows() != null && !sheet.getRows().isEmpty()) {
@@ -466,7 +446,6 @@ public class DataInsightsService {
         }
         int consistencyScore = Math.max(40, 100 - consistencyDeductions);
 
-        // 4. Validity Score (0-100)
         int validityScore = 100;
         for (Map.Entry<String, ColumnStatistics> entry : statsMap.entrySet()) {
             if ("NUMERIC".equalsIgnoreCase(entry.getValue().getDataType())) {
@@ -496,7 +475,6 @@ public class DataInsightsService {
             }
         }
 
-        // Overall Weighted Score
         int overallScore = (int) Math.round(
                 completenessScore * 0.35 +
                 uniquenessScore * 0.25 +
@@ -505,7 +483,6 @@ public class DataInsightsService {
         );
         overallScore = Math.min(100, Math.max(0, overallScore));
 
-        // Grade and Status
         String grade;
         String status;
         if (overallScore >= 95) {

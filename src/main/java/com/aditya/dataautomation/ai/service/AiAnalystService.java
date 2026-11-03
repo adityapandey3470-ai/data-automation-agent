@@ -1,14 +1,21 @@
 package com.aditya.dataautomation.ai.service;
 
+import com.aditya.dataautomation.admin.service.AiUsageService;
 import com.aditya.dataautomation.ai.model.*;
 import com.aditya.dataautomation.analysis.model.ColumnStatistics;
+import com.aditya.dataautomation.auth.entity.User;
+import com.aditya.dataautomation.auth.repository.UserRepository;
+import com.aditya.dataautomation.auth.security.UserPrincipal;
 import com.aditya.dataautomation.excel.model.ExcelSheetData;
 import com.aditya.dataautomation.excel.model.ExcelWorkbookData;
+import com.aditya.dataautomation.exception.InvalidRequestException;
+import com.aditya.dataautomation.exception.QuotaExceededException;
 import com.aditya.dataautomation.workbook.service.WorkbookSessionHolder;
 import com.fasterxml.jackson.databind.JsonNode;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.*;
 
@@ -20,8 +27,27 @@ public class AiAnalystService {
     private final GeminiClientService geminiClient;
     private final DataInsightsService insightsService;
     private final WorkbookSessionHolder sessionHolder;
+    private final AiUsageService aiUsageService;
+    private final UserRepository userRepository;
 
-    public AiAnalystResponse ask(String question, String sheetName) {
+    @Transactional
+    public AiAnalystResponse ask(UserPrincipal principal, String question, String sheetName) {
+        if (principal == null) {
+            throw new InvalidRequestException("Authentication required. Please sign in to use the AI Analyst.");
+        }
+
+        User user = userRepository.findById(principal.getId())
+                .orElseThrow(() -> new InvalidRequestException("User account not found"));
+
+        String tier = user.getSubscriptionTier() != null ? user.getSubscriptionTier().toUpperCase() : "FREE";
+        int used = user.getAiQueriesUsed() != null ? user.getAiQueriesUsed() : 0;
+        int limit = user.getAiQueriesLimit() != null ? user.getAiQueriesLimit() : 10;
+        boolean isAdmin = "ROLE_ADMIN".equals(user.getRole());
+
+        if (!isAdmin && !"ENTERPRISE".equals(tier) && used >= limit) {
+            throw new QuotaExceededException("You have reached your limit of " + limit + " AI queries for your " + tier + " plan. Please upgrade to Pro for higher limits.");
+        }
+
         long startTime = System.currentTimeMillis();
 
         ExcelWorkbookData workbook = sessionHolder.get();
@@ -42,10 +68,12 @@ public class AiAnalystService {
                     .build();
         }
 
-        // 1. Compute verified profile first
         DataProfileResponse profile = insightsService.generateProfile(sheet);
 
-        // 2. Try Gemini AI if available
+        AiAnalystResponse response = null;
+        int promptTokens = 0;
+        int completionTokens = 0;
+
         if (geminiClient.isAvailable()) {
             try {
                 List<Map<String, Object>> sample = sheet.getRows() != null && !sheet.getRows().isEmpty()
@@ -54,18 +82,76 @@ public class AiAnalystService {
 
                 JsonNode aiResult = geminiClient.askAnalyst(question, profile, sample);
                 if (aiResult != null && aiResult.has("answer")) {
-                    return parseAiResult(aiResult, profile, startTime);
+                    response = parseAiResult(aiResult, profile, startTime, question);
+                    promptTokens = Math.max(90, (question.length() + 850) / 4);
+                    completionTokens = Math.max(60, response.getAnswer().length() / 4);
                 }
             } catch (Exception e) {
                 log.warn("Gemini execution error, reverting to deterministic fallback: {}", e.getMessage());
             }
         }
 
-        // 3. Fallback: Deterministic Analytics Engine
-        return buildDeterministicFallback(question, profile, startTime);
+        if (response == null) {
+            response = buildDeterministicFallback(question, profile, startTime);
+            promptTokens = Math.max(60, (question.length() + 300) / 4);
+            completionTokens = Math.max(40, response.getAnswer().length() / 4);
+        }
+
+        int totalTokens = promptTokens + completionTokens;
+        long latency = Math.max(1, System.currentTimeMillis() - startTime);
+
+        aiUsageService.recordUsage(
+                user.getId(),
+                user.getEmail(),
+                "AI_ANALYST",
+                response.getModel() != null ? response.getModel() : geminiClient.getModelName(),
+                promptTokens,
+                completionTokens,
+                latency,
+                response.getStatus(),
+                question
+        );
+
+        int updatedUsed = used + 1;
+        long updatedTokens = (user.getTotalTokensUsed() != null ? user.getTotalTokensUsed() : 0L) + totalTokens;
+        user.setAiQueriesUsed(updatedUsed);
+        user.setTotalTokensUsed(updatedTokens);
+        userRepository.save(user);
+
+        response.setSubscriptionTier(tier);
+        response.setQueriesUsed(updatedUsed);
+        response.setQueriesLimit(limit);
+        response.setRemainingQueries(isAdmin || "ENTERPRISE".equals(tier) ? 999999 : Math.max(0, limit - updatedUsed));
+        response.setTokensConsumed(totalTokens);
+        response.setLatencyMs(latency);
+
+        return response;
     }
 
-    private AiAnalystResponse parseAiResult(JsonNode root, DataProfileResponse profile, long startTime) {
+    @Transactional(readOnly = true)
+    public Map<String, Object> getUserQuota(Long userId) {
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new InvalidRequestException("User account not found"));
+
+        String tier = user.getSubscriptionTier() != null ? user.getSubscriptionTier().toUpperCase() : "FREE";
+        int used = user.getAiQueriesUsed() != null ? user.getAiQueriesUsed() : 0;
+        int limit = user.getAiQueriesLimit() != null ? user.getAiQueriesLimit() : 10;
+        boolean isAdmin = "ROLE_ADMIN".equals(user.getRole());
+        int remaining = isAdmin || "ENTERPRISE".equals(tier) ? 999999 : Math.max(0, limit - used);
+        boolean reached = !isAdmin && !"ENTERPRISE".equals(tier) && used >= limit;
+
+        Map<String, Object> map = new LinkedHashMap<>();
+        map.put("subscriptionTier", tier);
+        map.put("queriesUsed", used);
+        map.put("queriesLimit", limit);
+        map.put("remainingQueries", remaining);
+        map.put("totalTokensUsed", user.getTotalTokensUsed() != null ? user.getTotalTokensUsed() : 0L);
+        map.put("isLimitReached", reached);
+        map.put("isAdmin", isAdmin);
+        return map;
+    }
+
+    private AiAnalystResponse parseAiResult(JsonNode root, DataProfileResponse profile, long startTime, String question) {
         String answer = root.path("answer").asText("Analysis completed.");
 
         List<DataInsight> insights = new ArrayList<>();
@@ -121,7 +207,6 @@ public class AiAnalystService {
                 .verifiedEvidence(evidence)
                 .suggestedActions(actions)
                 .suggestedFollowUps(followUps.isEmpty() ? profile.getSuggestedQuestions() : followUps)
-                .latencyMs(System.currentTimeMillis() - startTime)
                 .build();
     }
 
@@ -142,32 +227,31 @@ public class AiAnalystService {
                         .requiresConfirmation(true)
                         .build());
             } else {
-                answer.append("Verified duplicate check: Zero duplicate rows were found in this dataset.");
+                answer.append("No exact duplicate rows were detected in this sheet.");
             }
         } else if (q.contains("missing") || q.contains("null") || q.contains("empty")) {
-            answer.append(String.format("Dataset has %.1f%% completeness with %d missing cells across %d rows.",
-                    profile.getCompletenessPercentage(), profile.getMissingCells(), profile.getTotalRows()));
-            actions.add(AiSuggestedAction.builder()
-                    .label("Inspect Missing Values")
-                    .command("find missing values")
-                    .requiresConfirmation(false)
-                    .build());
-        } else if (q.contains("outlier") || q.contains("anomaly") || q.contains("extreme")) {
-            for (DataInsight ins : profile.getInsights()) {
-                if ("OUTLIER".equals(ins.getCategory())) {
-                    relevantInsights.add(ins);
-                }
-            }
-            if (relevantInsights.isEmpty()) {
-                answer.append("No severe outliers (> 2.8 standard deviations) were detected in numeric columns.");
+            if (profile.getMissingCells() > 0) {
+                answer.append(String.format("Detected %d missing cells across dataset (overall completeness: %.1f%%). ",
+                        profile.getMissingCells(), profile.getCompletenessPercentage()));
+                answer.append("Review columns with highest null rates to determine appropriate fill or drop strategies.");
             } else {
-                answer.append(String.format("Detected %d statistical outlier patterns in numeric fields.", relevantInsights.size()));
+                answer.append("Dataset is 100% complete with no empty or null cells detected.");
+            }
+        } else if (q.contains("correlation") || q.contains("relationship") || q.contains("trend")) {
+            int statCols = profile.getColumnStatistics() != null ? profile.getColumnStatistics().size() : 0;
+            answer.append(String.format("Sheet contains %d analyzed columns. ", statCols));
+            if (!profile.getInsights().isEmpty()) {
+                answer.append("Key statistical discovery: ").append(profile.getInsights().get(0).getStatisticalFact()).append(" ");
+                answer.append(profile.getInsights().get(0).getInterpretation());
+                relevantInsights.add(profile.getInsights().get(0));
             }
         } else {
-            answer.append(String.format("Dataset '%s' contains %d rows and %d columns (%s). Overall completeness is %.1f%% with %d duplicate records.",
-                    profile.getSheetName(), profile.getTotalRows(), profile.getTotalColumns(),
-                    String.join(", ", profile.getHeaders()), profile.getCompletenessPercentage(), profile.getDuplicateRowsCount()));
-            relevantInsights = profile.getInsights();
+            answer.append(String.format("Workbook overview for '%s': %d records with %d columns. ",
+                    profile.getSheetName(), profile.getTotalRows(), profile.getTotalColumns()));
+            if (!profile.getInsights().isEmpty()) {
+                answer.append(profile.getInsights().get(0).getStatisticalFact()).append(". ");
+                relevantInsights.addAll(profile.getInsights().subList(0, Math.min(3, profile.getInsights().size())));
+            }
         }
 
         Map<String, Object> evidence = new LinkedHashMap<>();
@@ -185,7 +269,6 @@ public class AiAnalystService {
                 .verifiedEvidence(evidence)
                 .suggestedActions(actions)
                 .suggestedFollowUps(profile.getSuggestedQuestions())
-                .latencyMs(System.currentTimeMillis() - startTime)
                 .build();
     }
 

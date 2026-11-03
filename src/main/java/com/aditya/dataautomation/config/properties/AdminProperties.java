@@ -9,14 +9,8 @@ import org.springframework.validation.annotation.Validated;
 @ConfigurationProperties(prefix = "app.admin")
 public class AdminProperties {
 
-    /**
-     * Initial administrator email address. If blank, no admin user is auto-provisioned.
-     */
     private String email;
 
-    /**
-     * Initial administrator password.
-     */
     private String password;
 
     private String name = "System Administrator";

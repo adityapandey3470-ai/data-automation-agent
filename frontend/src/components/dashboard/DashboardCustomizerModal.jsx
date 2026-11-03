@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   X, Check, RotateCcw, Palette, Sliders, Layers, Eye, EyeOff,
   MoveUp, MoveDown, Sparkles, ImageIcon, Pipette, Type
@@ -18,9 +18,17 @@ export default function DashboardCustomizerModal({
   onUpdateDraft,
   onSave,
   onReset,
-  hasUnsavedChanges
+  hasUnsavedChanges,
+  livePreview
 }) {
   const [activeTab, setActiveTab] = useState('styles');
+
+  useEffect(() => {
+    document.body.classList.add('customizer-drawer-open');
+    return () => {
+      document.body.classList.remove('customizer-drawer-open');
+    };
+  }, []);
 
   if (!isOpen) return null;
 
@@ -28,7 +36,8 @@ export default function DashboardCustomizerModal({
     onUpdateDraft(prev => ({
       ...prev,
       style: presetId,
-      ...(presetId === 'dark' ? { palette: 'midnight_navy' } : {})
+      ...(presetId === 'dark' ? { palette: 'midnight_navy' } : {}),
+      ...(presetId === 'cyberpunk' ? { palette: 'cyber_neon' } : {})
     }));
   };
 
@@ -185,6 +194,11 @@ export default function DashboardCustomizerModal({
 
   return (
     <div className="dashboard-customizer-backdrop" onClick={onClose}>
+      {livePreview && (
+        <div className="dashboard-customizer-preview-container" onClick={e => e.stopPropagation()}>
+          {livePreview}
+        </div>
+      )}
       <div className="dashboard-customizer-drawer" onClick={e => e.stopPropagation()}>
         <div className="dash-customizer-header">
           <div>

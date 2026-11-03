@@ -155,9 +155,6 @@ export default function AnalyticsPage({ sheetName, sheets, onSelectSheet, header
   );
 }
 
-/* ============================================================
-   1. STATISTICS TAB
-   ============================================================ */
 function StatisticsTab({ sheetName, headers }) {
   const [column, setColumn] = useState('');
   const [stats, setStats] = useState(null);
@@ -266,9 +263,6 @@ function StatisticsTab({ sheetName, headers }) {
   );
 }
 
-/* ============================================================
-   2. FILTER TAB
-   ============================================================ */
 function FilterTab({ sheetName, headers }) {
   const [conditions, setConditions] = useState([{ column: headers[0] || '', operator: 'EQUALS', value: '' }]);
   const [result, setResult] = useState(null);
@@ -368,9 +362,6 @@ function FilterTab({ sheetName, headers }) {
   );
 }
 
-/* ============================================================
-   3. SORT TAB
-   ============================================================ */
 function SortTab({ sheetName, headers }) {
   const [sortList, setSortList] = useState([{ column: headers[0] || '', direction: 'ASC' }]);
   const [result, setResult] = useState(null);
@@ -463,9 +454,6 @@ function SortTab({ sheetName, headers }) {
   );
 }
 
-/* ============================================================
-   4. GROUP BY TAB (ULTRA-FAST VIRTUALIZED GROUPING ENGINE)
-   ============================================================ */
 function GroupTab({ sheetName, headers }) {
   const [groupCol, setGroupCol] = useState(headers[0] || '');
   const [aggCol, setAggCol] = useState(headers[1] || headers[0] || '');
@@ -474,7 +462,7 @@ function GroupTab({ sheetName, headers }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [search, setSearch] = useState('');
-  const [sortKey, setSortKey] = useState('count'); // 'key' | 'count' | 'value'
+  const [sortKey, setSortKey] = useState('count');
   const [sortAsc, setSortAsc] = useState(false);
   const [durationMs, setDurationMs] = useState(null);
 
@@ -525,7 +513,7 @@ function GroupTab({ sheetName, headers }) {
       } else if (sortKey === 'value') {
         valA = a.aggregationValue != null ? Number(a.aggregationValue) : 0;
         valB = b.aggregationValue != null ? Number(b.aggregationValue) : 0;
-      } else { // 'count'
+      } else {
         valA = a.count || 0;
         valB = b.count || 0;
       }
@@ -535,7 +523,6 @@ function GroupTab({ sheetName, headers }) {
     return list;
   }, [groupData, search, sortKey, sortAsc]);
 
-  // Virtualizer for smooth 60fps scrolling over any number of groups (1 to 50,000+)
   const rowVirtualizer = useVirtualizer({
     count: processedGroups.length,
     getScrollElement: () => tableContainerRef.current,
@@ -556,11 +543,10 @@ function GroupTab({ sheetName, headers }) {
       setSortAsc(!sortAsc);
     } else {
       setSortKey(key);
-      setSortAsc(false); // default highest first
+      setSortAsc(false);
     }
   };
 
-  // Top 8 breakdown for instant visual preview
   const visualChartData = useMemo(() => {
     if (!groupData?.groups || groupData.groups.length === 0) return [];
     const sorted = [...groupData.groups].sort((a, b) => {
@@ -805,9 +791,6 @@ function GroupTab({ sheetName, headers }) {
   );
 }
 
-/* ============================================================
-   5. DUPLICATES TAB
-   ============================================================ */
 function DuplicatesTab({ sheetName, headers }) {
   const [selectedCols, setSelectedCols] = useState([]);
   const [result, setResult] = useState(null);
@@ -890,9 +873,6 @@ function DuplicatesTab({ sheetName, headers }) {
   );
 }
 
-/* ============================================================
-   SHARED RESULT TABLE
-   ============================================================ */
 function ResultRowsTable({ headers, rows }) {
   if (!rows || rows.length === 0) return <p style={{ fontSize: 13, color: 'var(--text-secondary)' }}>No rows found matching current criteria.</p>;
   return (
@@ -921,9 +901,6 @@ function ResultRowsTable({ headers, rows }) {
   );
 }
 
-/* ============================================================
-   6. DASHBOARD TAB (POWER BI-STYLE INTERACTIVE EXPERIENCE)
-   ============================================================ */
 function DashboardTab({ sheetName, headers, sheets, onSelectSheet }) {
   const [dashboardId, setDashboardId] = useState(null);
   const [dashboard, setDashboard] = useState(null);
@@ -1268,10 +1245,8 @@ function DashboardTab({ sheetName, headers, sheets, onSelectSheet }) {
   const handleRemove = async (wid) => {
     if (!wid || removingIds.has(wid)) return;
 
-    // 1. Debounce and mark as in-flight
     setRemovingIds(prev => new Set(prev).add(wid));
 
-    // 2. Optimistic UI update: remove from local state immediately (0ms delay)
     setDashboard(prev => {
       if (!prev?.widgets) return prev;
       return {
@@ -1284,7 +1259,7 @@ function DashboardTab({ sheetName, headers, sheets, onSelectSheet }) {
       await removeWidget(dashboardId, wid);
     } catch (err) {
       const msg = getErrorMessage(err, '');
-      // If widget was already removed on backend, treat as resolved
+
       if (!msg.toLowerCase().includes('not found')) {
         setError(msg || 'Failed to remove widget');
         refresh();
@@ -1298,7 +1273,6 @@ function DashboardTab({ sheetName, headers, sheets, onSelectSheet }) {
     }
   };
 
-  // Derive filterable dimensions from active charts and tables
   const filterDimensions = useMemo(() => {
     if (!dashboard?.widgets) return [];
     const dims = new Set();
@@ -1310,7 +1284,6 @@ function DashboardTab({ sheetName, headers, sheets, onSelectSheet }) {
     return Array.from(dims);
   }, [dashboard]);
 
-  // Distinct values for currently selected slicer dimension
   const availableFilterValues = useMemo(() => {
     if (!filterCol || !dashboard?.widgets) return [];
     const vals = new Set();
@@ -1669,21 +1642,8 @@ function DashboardTab({ sheetName, headers, sheets, onSelectSheet }) {
         </div>
       )}
 
-      <div
-        id="dashboard-canvas-area"
-        className="dashboard-canvas-wrapper chart-dashboard-customized"
-        style={dashboardStyleVars}
-        data-dash-style={currentPrefs.style || 'modern'}
-        data-dash-card-style={currentPrefs.card?.style || 'bordered'}
-        data-dash-card-radius={currentPrefs.card?.radius || 'medium'}
-        data-dash-card-shadow={currentPrefs.card?.shadow || 'subtle'}
-        data-dash-density={currentPrefs.layout?.density || 'comfortable'}
-        data-dash-typography={currentPrefs.typography?.size || 'medium'}
-        data-dash-emphasis={currentPrefs.typography?.emphasis || 'standard'}
-        data-dash-motion={currentPrefs.typography?.reducedMotion ? 'reduced' : 'normal'}
-        data-dash-dark={currentPrefs.style === 'dark' || currentPrefs.palette === 'midnight_navy' ? 'true' : 'false'}
-      >
-        {(() => {
+      {(() => {
+        const renderDashboardWidgets = (isLivePreview = false) => {
           const widgetsConfig = currentPrefs.layout?.widgets || [
             { id: 'kpi_cards', visible: true, order: 0 },
             { id: 'chart_visuals', visible: true, order: 1 }
@@ -1698,7 +1658,7 @@ function DashboardTab({ sheetName, headers, sheets, onSelectSheet }) {
                     <KpiWidgetCard
                       key={w.widgetId}
                       widget={w}
-                      onRemove={handleRemove}
+                      onRemove={isLivePreview ? undefined : handleRemove}
                       isRemoving={removingIds.has(w.widgetId)}
                       activeFilter={{ column: filterCol, value: filterVal }}
                       paletteColors={activePalette}
@@ -1716,13 +1676,13 @@ function DashboardTab({ sheetName, headers, sheets, onSelectSheet }) {
                         key={w.widgetId}
                         widget={w}
                         index={idx}
-                        onRemove={handleRemove}
+                        onRemove={isLivePreview ? undefined : handleRemove}
                         isRemoving={removingIds.has(w.widgetId)}
                         activeFilter={{ column: filterCol, value: filterVal }}
-                        onCrossFilter={handleCrossFilter}
-                        onDragStart={handleDragStart}
-                        onDragOver={handleDragOver}
-                        onDrop={handleDrop}
+                        onCrossFilter={isLivePreview ? undefined : handleCrossFilter}
+                        onDragStart={isLivePreview ? undefined : handleDragStart}
+                        onDragOver={isLivePreview ? undefined : handleDragOver}
+                        onDrop={isLivePreview ? undefined : handleDrop}
                         paletteColors={activePalette}
                       />
                     ))}
@@ -1738,9 +1698,11 @@ function DashboardTab({ sheetName, headers, sheets, onSelectSheet }) {
                       </div>
                       <h4 className="empty-title">Dashboard Empty</h4>
                       <p className="empty-desc">No widgets currently configured on this board.</p>
-                      <button className="btn btn-primary mt-12" onClick={handleAutoGenerate}>
-                        <Sparkles size={14} /> Auto-Generate Widgets
-                      </button>
+                      {!isLivePreview && (
+                        <button className="btn btn-primary mt-12" onClick={handleAutoGenerate}>
+                          <Sparkles size={14} /> Auto-Generate Widgets
+                        </button>
+                      )}
                     </div>
                   </div>
                 );
@@ -1748,25 +1710,75 @@ function DashboardTab({ sheetName, headers, sheets, onSelectSheet }) {
             }
             return null;
           });
-        })()}
-      </div>
+        };
 
-      <DashboardCustomizerModal
-        isOpen={showCustomizer}
-        onClose={handleCloseCustomizer}
-        draft={draftPreferences}
-        onUpdateDraft={setDraftPreferences}
-        onSave={handleSavePreferences}
-        onReset={handleResetPreferences}
-        hasUnsavedChanges={hasUnsavedChanges}
-      />
+        return (
+          <>
+            <div
+              id="dashboard-canvas-area"
+              className="dashboard-canvas-wrapper chart-dashboard-customized"
+              style={dashboardStyleVars}
+              data-dash-style={currentPrefs.style || 'modern'}
+              data-dash-card-style={currentPrefs.card?.style || 'bordered'}
+              data-dash-card-radius={currentPrefs.card?.radius || 'medium'}
+              data-dash-card-shadow={currentPrefs.card?.shadow || 'subtle'}
+              data-dash-density={currentPrefs.layout?.density || 'comfortable'}
+              data-dash-typography={currentPrefs.typography?.size || 'medium'}
+              data-dash-emphasis={currentPrefs.typography?.emphasis || 'standard'}
+              data-dash-motion={currentPrefs.typography?.reducedMotion ? 'reduced' : 'normal'}
+              data-dash-dark={currentPrefs.style === 'dark' || currentPrefs.palette === 'midnight_navy' ? 'true' : 'false'}
+            >
+              {renderDashboardWidgets(false)}
+            </div>
+
+            <DashboardCustomizerModal
+              isOpen={showCustomizer}
+              onClose={handleCloseCustomizer}
+              draft={draftPreferences}
+              onUpdateDraft={setDraftPreferences}
+              onSave={handleSavePreferences}
+              onReset={handleResetPreferences}
+              hasUnsavedChanges={hasUnsavedChanges}
+              livePreview={
+                <div
+                  className="dashboard-live-preview-stage"
+                  style={dashboardStyleVars}
+                  data-dash-style={currentPrefs.style || 'modern'}
+                  data-dash-card-style={currentPrefs.card?.style || 'bordered'}
+                  data-dash-card-radius={currentPrefs.card?.radius || 'medium'}
+                  data-dash-card-shadow={currentPrefs.card?.shadow || 'subtle'}
+                  data-dash-density={currentPrefs.layout?.density || 'comfortable'}
+                  data-dash-typography={currentPrefs.typography?.size || 'medium'}
+                  data-dash-emphasis={currentPrefs.typography?.emphasis || 'standard'}
+                  data-dash-motion={currentPrefs.typography?.reducedMotion ? 'reduced' : 'normal'}
+                  data-dash-dark={currentPrefs.style === 'dark' || currentPrefs.palette === 'midnight_navy' ? 'true' : 'false'}
+                >
+                  <div className="dash-preview-header-bar">
+                    <div className="dash-preview-title-wrap">
+                      <span className="dash-preview-pulse-badge">
+                        <span className="pulse-dot"></span>
+                        LIVE PREVIEW
+                      </span>
+                      <span className="dash-preview-board-name">
+                        {dashboard?.name || 'Executive Overview Dashboard'}
+                      </span>
+                    </div>
+                    <div className="dash-preview-tip">
+                      Real-time interactive canvas • Updates instantly as you select styles & colors
+                    </div>
+                  </div>
+                  <div className="dashboard-canvas-wrapper chart-dashboard-customized dash-preview-canvas">
+                    {renderDashboardWidgets(true)}
+                  </div>
+                </div>
+              }
+            />
+          </>
+        );
+      })()}
     </>
   );
 }
-
-/* ============================================================
-   WIDGET COMPONENTS (POWER BI VISUALS)
-   ============================================================ */
 
 const KpiWidgetCard = React.memo(function KpiWidgetCard({ widget, onRemove, activeFilter, isRemoving }) {
   const { widgetId, title, aggregation, columnName, kpiValue, growthRate, growthTrend, alertStatus } = widget;
@@ -1920,7 +1932,6 @@ const BarW = React.memo(function BarW({ widget, activeFilter, onCrossFilter, pal
   const primaryColor = paletteColors?.primary || '#059669';
   const secondaryColor = paletteColors?.secondary || '#10b981';
 
-  // Defensive client-side grouping if categories > 12: top 10 + "Other (N)"
   const processedData = useMemo(() => {
     let raw = (data || []).map(d => ({
       label: d.label,
@@ -1995,7 +2006,6 @@ const LineW = React.memo(function LineW({ widget, activeFilter, onCrossFilter, p
 
   const primaryColor = paletteColors?.primary || '#059669';
 
-  // Defensive client-side time-series downsampling if points > 50: downsample to 40 representative buckets
   const processedData = useMemo(() => {
     let raw = (data || []).map(d => ({
       label: d.label,
@@ -2074,7 +2084,6 @@ const AreaW = React.memo(function AreaW({ widget, activeFilter, onCrossFilter, p
   const primaryColor = paletteColors?.primary || '#10b981';
   const gradientId = `areaGradient_${widget.widgetId || 'default'}`;
 
-  // Defensive client-side time-series downsampling if points > 50: downsample to 40 representative buckets
   const processedData = useMemo(() => {
     let raw = (data || []).map(d => ({
       label: d.label,
@@ -2168,7 +2177,7 @@ const PieW = React.memo(function PieW({ widget, activeFilter, onCrossFilter, pal
       name: String(d.label),
       value: Number(d.value)
     }));
-    // Client-side grouping defense if categories > 10: top 8 + "Others"
+
     if (raw.length > 10) {
       const sorted = [...raw].sort((a, b) => Math.abs(b.value) - Math.abs(a.value));
       const top8 = sorted.slice(0, 8);
@@ -2234,7 +2243,7 @@ const DonutW = React.memo(function DonutW({ widget, activeFilter, onCrossFilter,
       name: String(d.label),
       value: Number(d.value)
     }));
-    // Client-side grouping defense if categories > 10: top 8 + "Others"
+
     if (raw.length > 10) {
       const sorted = [...raw].sort((a, b) => Math.abs(b.value) - Math.abs(a.value));
       const top8 = sorted.slice(0, 8);

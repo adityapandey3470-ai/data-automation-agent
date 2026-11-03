@@ -6,6 +6,7 @@ import com.aditya.dataautomation.ai.model.DataProfileResponse;
 import com.aditya.dataautomation.ai.service.AiAnalystService;
 import com.aditya.dataautomation.ai.service.DataInsightsService;
 import com.aditya.dataautomation.ai.service.GeminiClientService;
+import com.aditya.dataautomation.auth.security.UserPrincipal;
 import com.aditya.dataautomation.excel.model.ExcelSheetData;
 import com.aditya.dataautomation.excel.model.ExcelWorkbookData;
 import com.aditya.dataautomation.workbook.service.WorkbookSessionHolder;
@@ -13,7 +14,9 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.Map;
@@ -39,6 +42,15 @@ public class AiAnalystController {
         ));
     }
 
+    @GetMapping("/quota")
+    @Operation(summary = "Get user's AI quota and subscription tier status")
+    public ResponseEntity<Map<String, Object>> getQuota(@AuthenticationPrincipal UserPrincipal principal) {
+        if (principal == null) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+        }
+        return ResponseEntity.ok(analystService.getUserQuota(principal.getId()));
+    }
+
     @GetMapping("/profile")
     @Operation(summary = "Generate automatic data insights profile",
             description = "Analyzes active workbook and returns comprehensive data profile, statistical facts, and insights")
@@ -60,8 +72,10 @@ public class AiAnalystController {
     @PostMapping("/ask")
     @Operation(summary = "Ask the AI Analyst a question",
             description = "Analyzes question with Gemini AI (or deterministic engine) using verified dataset profile")
-    public ResponseEntity<AiAnalystResponse> ask(@Valid @RequestBody AiAnalystRequest request) {
-        AiAnalystResponse response = analystService.ask(request.getQuestion(), request.getSheetName());
+    public ResponseEntity<AiAnalystResponse> ask(
+            @AuthenticationPrincipal UserPrincipal principal,
+            @Valid @RequestBody AiAnalystRequest request) {
+        AiAnalystResponse response = analystService.ask(principal, request.getQuestion(), request.getSheetName());
         return ResponseEntity.ok(response);
     }
 

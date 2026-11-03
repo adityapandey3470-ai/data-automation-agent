@@ -29,12 +29,12 @@ public class PdfReportExportService {
 
     private final DataInsightsService dataInsightsService;
 
-    private static final Color PRIMARY_COLOR = new Color(30, 58, 138);     // Indigo/Navy #1e3a8a
-    private static final Color ACCENT_COLOR = new Color(59, 130, 246);     // Blue #3b82f6
-    private static final Color TEXT_COLOR = new Color(31, 41, 55);         // Slate #1f2937
-    private static final Color MUTED_COLOR = new Color(107, 114, 128);     // Gray #6b7280
-    private static final Color BG_LIGHT = new Color(248, 250, 252);        // Slate light
-    private static final Color BORDER_COLOR = new Color(226, 232, 240);    // Slate border
+    private static final Color PRIMARY_COLOR = new Color(30, 58, 138);
+    private static final Color ACCENT_COLOR = new Color(59, 130, 246);
+    private static final Color TEXT_COLOR = new Color(31, 41, 55);
+    private static final Color MUTED_COLOR = new Color(107, 114, 128);
+    private static final Color BG_LIGHT = new Color(248, 250, 252);
+    private static final Color BORDER_COLOR = new Color(226, 232, 240);
 
     public byte[] generateExecutivePdfReport(ExcelWorkbookData workbook, String sheetName) {
         if (workbook == null || workbook.getSheets() == null || workbook.getSheets().isEmpty()) {
@@ -178,7 +178,7 @@ public class PdfReportExportService {
         Font rowFont = FontFactory.getFont(FontFactory.HELVETICA, 8, TEXT_COLOR);
         int count = 0;
         for (QualityIssue issue : quality.getIssues()) {
-            if (count++ >= 8) break; // Keep top 8 issues to avoid overflowing
+            if (count++ >= 8) break;
             table.addCell(createCell(issue.getDimension(), rowFont));
             table.addCell(createCell(issue.getSeverity(), rowFont));
             table.addCell(createCell(issue.getColumn() != null ? issue.getColumn() : "Dataset", rowFont));

@@ -22,5 +22,5 @@ public class AdminFileDto {
     private Integer rowCount;
     private Integer columnCount;
     private LocalDateTime uploadedAt;
-    private String source; // "PROJECT" or "WORKING_SESSION"
+    private String source;
 }

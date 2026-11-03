@@ -149,8 +149,8 @@ public class DashboardController {
     }
 
     private ExcelWorkbookData getWorkbookOrThrow(Long userId, String fileId) {
-        ExcelWorkbookData workbook = fileId != null 
-                ? workbookSessionHolder.getWorkbook(fileId) 
+        ExcelWorkbookData workbook = fileId != null
+                ? workbookSessionHolder.getWorkbook(fileId)
                 : workbookSessionHolder.get();
         if (workbook == null) {
             throw new DashboardException(

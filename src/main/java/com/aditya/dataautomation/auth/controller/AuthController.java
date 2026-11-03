@@ -56,6 +56,33 @@ public class AuthController {
         ));
     }
 
+    @PostMapping("/verify-email")
+    @Operation(summary = "Verify user email address using single-use verification token")
+    public ResponseEntity<AuthResponse> verifyEmail(
+            @Valid @RequestBody com.aditya.dataautomation.auth.dto.VerifyEmailRequest request) {
+        AuthResponse response = authService.verifyEmail(request.getToken());
+        return ResponseEntity.ok(response);
+    }
+
+    @GetMapping("/verify-email")
+    @Operation(summary = "Verify user email address via link parameter")
+    public ResponseEntity<AuthResponse> verifyEmailByParam(@RequestParam("token") String token) {
+        AuthResponse response = authService.verifyEmail(token);
+        return ResponseEntity.ok(response);
+    }
+
+    @PostMapping("/resend-verification")
+    @Operation(summary = "Resend email verification link")
+    public ResponseEntity<java.util.Map<String, Object>> resendVerification(
+            @Valid @RequestBody com.aditya.dataautomation.auth.dto.ResendVerificationRequest request) {
+        AuthResponse response = authService.resendVerification(request.getEmail());
+        return ResponseEntity.ok(java.util.Map.of(
+                "success", true,
+                "message", response.getMessage() != null ? response.getMessage() : "Verification link sent.",
+                "smtpConfigured", response.isSmtpConfigured()
+        ));
+    }
+
     @GetMapping("/me")
     @Operation(summary = "Get current authenticated user profile")
     public ResponseEntity<?> getCurrentUser(@AuthenticationPrincipal UserPrincipal principal) {

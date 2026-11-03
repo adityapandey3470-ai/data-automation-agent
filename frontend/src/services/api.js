@@ -2,7 +2,6 @@ import axios from 'axios';
 
 const api = axios.create({ baseURL: '/api/v1' });
 
-// ---- Request Interceptor: Attach JWT Token ----
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem('tabufinery_token');
   if (token) {
@@ -11,13 +10,12 @@ api.interceptors.request.use((config) => {
   return config;
 }, (error) => Promise.reject(error));
 
-// ---- Response Interceptor: Auto-logout on 401 ----
 api.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response?.status === 401) {
       const url = error.config?.url || '';
-      if (!url.includes('/auth/login') && !url.includes('/auth/signup') && !url.includes('/auth/forgot') && !url.includes('/auth/reset')) {
+      if (!url.includes('/auth/login') && !url.includes('/auth/signup') && !url.includes('/auth/forgot') && !url.includes('/auth/reset') && !url.includes('/auth/verify-email')) {
         clearStoredAuth();
         window.dispatchEvent(new CustomEvent('tabufinery_unauthorized'));
       }
@@ -26,11 +24,9 @@ api.interceptors.response.use(
   }
 );
 
-// ---- User-Friendly Error Formatting (No raw HTTP status codes in UI) ----
 export const getErrorMessage = (err, fallback = 'An unexpected error occurred. Please try again.') => {
   if (!err) return fallback;
 
-  // 1. If backend returned a clear user-friendly string message
   const serverMsg = err.response?.data?.message || err.response?.data?.error;
   if (typeof serverMsg === 'string' && serverMsg.trim()) {
     if (!/status code \d{3}/i.test(serverMsg) && !/HTTP \d{3}/i.test(serverMsg)) {
@@ -38,7 +34,6 @@ export const getErrorMessage = (err, fallback = 'An unexpected error occurred. P
     }
   }
 
-  // 2. Check HTTP status code and map to friendly human message
   const status = err.response?.status;
   if (status === 401) {
     return 'Please sign in to continue.';
@@ -59,12 +54,10 @@ export const getErrorMessage = (err, fallback = 'An unexpected error occurred. P
     return 'Server encountered a temporary issue. Please try again in a moment.';
   }
 
-  // 3. Network or connection errors
   if (err.message === 'Network Error' || !err.response) {
     return 'Unable to connect to the server. Please check your network connection.';
   }
 
-  // 4. Fallback (strip out raw "Request failed with status code XXX")
   if (typeof err.message === 'string') {
     if (/status code \d{3}/i.test(err.message) || /Network Error/i.test(err.message)) {
       return fallback;
@@ -107,6 +100,12 @@ export const forgotPassword = (email) =>
 export const resetPassword = (token, newPassword, confirmPassword) =>
   api.post('/auth/reset-password', { token, newPassword, confirmPassword });
 
+export const verifyEmail = (token) =>
+  api.post('/auth/verify-email', { token });
+
+export const resendVerification = (email) =>
+  api.post('/auth/resend-verification', { email });
+
 export const getCurrentUser = () => api.get('/auth/me');
 
 export const getAdminUsers = (page = 0, size = 50) =>
@@ -116,6 +115,8 @@ export const updateAdminUserStatus = (id, enabled) =>
   api.patch(`/admin/users/${id}/status`, { enabled });
 export const updateAdminUserRole = (id, role) =>
   api.patch(`/admin/users/${id}/role`, { role });
+export const deleteAdminUser = (id) =>
+  api.delete(`/admin/users/${id}`);
 
 export const saveProject = (name, description, activeSheetName, projectId = null) =>
   api.post('/projects/save', { name, description, activeSheetName, projectId });
@@ -230,6 +231,13 @@ export const getDataProfile = (sheetName) =>
   api.get('/ai/profile', { params: sheetName ? { sheetName } : {} });
 export const askAiAnalyst = (question, sheetName) =>
   api.post('/ai/ask', { question, sheetName });
+export const getAiQuota = () =>
+  api.get('/ai/quota');
+
+export const updateAdminUserSubscription = (id, tier) =>
+  api.patch(`/admin/users/${id}/subscription`, { tier });
+export const resetAdminUserAiQuota = (id) =>
+  api.post(`/admin/users/${id}/reset-quota`);
 
 export const sendSupportMessage = (message, history = []) =>
   api.post('/support/chat', { message, history });
@@ -248,6 +256,8 @@ export const getAdminTickets = () =>
 
 export const updateAdminTicketStatus = (id, status) =>
   api.patch(`/admin/tickets/${id}/status`, { status });
+export const deleteAdminTicket = (id) =>
+  api.delete(`/admin/tickets/${id}`);
 
 export const getAdminFiles = () =>
   api.get('/admin/files');
@@ -257,6 +267,11 @@ export const deleteAdminFile = (fileId) =>
 
 export const getAdminAuditLogs = () =>
   api.get('/admin/audit-logs');
+export const pruneAdminAuditLogs = (days = 30) =>
+  api.delete('/admin/audit-logs/prune', { params: { days } });
+
+export const getAdminAiMetrics = () =>
+  api.get('/admin/ai-metrics');
 
 export const submitExcelAsync = (file) => {
   const form = new FormData();
@@ -274,4 +289,3 @@ export const cancelJob = (jobId) =>
 
 export const listRecentJobs = () =>
   api.get('/jobs');
-

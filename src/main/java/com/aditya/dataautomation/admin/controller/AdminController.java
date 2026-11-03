@@ -3,6 +3,7 @@ package com.aditya.dataautomation.admin.controller;
 import com.aditya.dataautomation.admin.dto.*;
 import com.aditya.dataautomation.admin.entity.AuditLog;
 import com.aditya.dataautomation.admin.service.AdminService;
+import com.aditya.dataautomation.admin.service.AiUsageService;
 import com.aditya.dataautomation.auth.security.UserPrincipal;
 import com.aditya.dataautomation.support.entity.SupportTicket;
 import io.swagger.v3.oas.annotations.Operation;
@@ -24,6 +25,7 @@ import java.util.List;
 public class AdminController {
 
     private final AdminService adminService;
+    private final AiUsageService aiUsageService;
 
     @GetMapping("/users")
     @Operation(summary = "List registered platform users with bounded pagination")
@@ -59,6 +61,34 @@ public class AdminController {
         return ResponseEntity.ok(dto);
     }
 
+    @RequestMapping(value = "/users/{id}/subscription", method = {RequestMethod.PATCH, RequestMethod.PUT})
+    @Operation(summary = "Update user subscription tier (FREE, PRO, ENTERPRISE)")
+    public ResponseEntity<AdminUserDto> updateSubscription(
+            @AuthenticationPrincipal UserPrincipal principal,
+            @PathVariable Long id,
+            @Valid @RequestBody UpdateSubscriptionRequest request) {
+        AdminUserDto dto = adminService.setUserSubscription(principal.getId(), principal.getUsername(), id, request.getTier());
+        return ResponseEntity.ok(dto);
+    }
+
+    @PostMapping("/users/{id}/reset-quota")
+    @Operation(summary = "Reset user AI query quota count back to zero")
+    public ResponseEntity<AdminUserDto> resetQuota(
+            @AuthenticationPrincipal UserPrincipal principal,
+            @PathVariable Long id) {
+        AdminUserDto dto = adminService.resetUserAiQuota(principal.getId(), principal.getUsername(), id);
+        return ResponseEntity.ok(dto);
+    }
+
+    @DeleteMapping("/users/{id}")
+    @Operation(summary = "Permanently delete a user account and associated resources")
+    public ResponseEntity<Void> deleteUser(
+            @AuthenticationPrincipal UserPrincipal principal,
+            @PathVariable Long id) {
+        adminService.deleteUser(principal.getId(), principal.getUsername(), id);
+        return ResponseEntity.noContent().build();
+    }
+
     @GetMapping("/tickets")
     @Operation(summary = "List all support tickets and user bug reports")
     public ResponseEntity<List<SupportTicket>> listTickets() {
@@ -73,6 +103,15 @@ public class AdminController {
             @Valid @RequestBody UpdateTicketStatusRequest request) {
         SupportTicket updated = adminService.updateTicketStatus(principal.getId(), principal.getUsername(), id, request.getStatus());
         return ResponseEntity.ok(updated);
+    }
+
+    @DeleteMapping("/tickets/{id}")
+    @Operation(summary = "Permanently delete a support ticket or bug report")
+    public ResponseEntity<Void> deleteTicket(
+            @AuthenticationPrincipal UserPrincipal principal,
+            @PathVariable Long id) {
+        adminService.deleteTicket(principal.getId(), principal.getUsername(), id);
+        return ResponseEntity.noContent().build();
     }
 
     @GetMapping("/files")
@@ -94,5 +133,24 @@ public class AdminController {
     @Operation(summary = "List recent administrative security and action logs")
     public ResponseEntity<List<AuditLog>> listAuditLogs() {
         return ResponseEntity.ok(adminService.listAuditLogs());
+    }
+
+    @DeleteMapping("/audit-logs/prune")
+    @Operation(summary = "Prune security audit logs older than specified days")
+    public ResponseEntity<java.util.Map<String, Object>> pruneAuditLogs(
+            @AuthenticationPrincipal UserPrincipal principal,
+            @RequestParam(defaultValue = "30") Integer days) {
+        int count = adminService.pruneAuditLogs(principal.getId(), principal.getUsername(), days);
+        return ResponseEntity.ok(java.util.Map.of(
+                "success", true,
+                "deletedCount", count,
+                "message", "Successfully pruned " + count + " audit log records."
+        ));
+    }
+
+    @GetMapping("/ai-metrics")
+    @Operation(summary = "Get AI token usage metrics and operational analytics")
+    public ResponseEntity<AiMetricsDto> getAiMetrics() {
+        return ResponseEntity.ok(aiUsageService.getMetrics());
     }
 }

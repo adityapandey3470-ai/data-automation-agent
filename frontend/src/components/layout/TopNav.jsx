@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { getHealth } from '../../services/api';
-import { Search, FileSpreadsheet, Menu, Folder, User, LogOut, Shield, ChevronDown, Sliders } from '../icons/Icons';
+import { Search, FileSpreadsheet, Menu, Folder, User, LogOut, Shield, ChevronDown, Sliders, Crown } from '../icons/Icons';
 
 export default function TopNav({
   title,
@@ -216,6 +216,9 @@ export default function TopNav({
             </div>
             <div className="topnav-user-info-text">
               <span className="topnav-user-name">{currentUser.name?.split(' ')[0] || 'Account'}</span>
+              <span className={`topnav-user-tier-badge tier-${(currentUser.subscriptionTier || 'FREE').toLowerCase()}`}>
+                {currentUser.subscriptionTier || 'FREE'}
+              </span>
               {currentUser.role === 'ROLE_ADMIN' && (
                 <span className="topnav-user-role-badge">Admin</span>
               )}
@@ -232,6 +235,9 @@ export default function TopNav({
                 <div className="user-dropdown-meta">
                   <div className="user-dropdown-name">
                     <span>{currentUser.name}</span>
+                    <span className={`topnav-user-tier-badge tier-${(currentUser.subscriptionTier || 'FREE').toLowerCase()}`}>
+                      {currentUser.subscriptionTier || 'FREE'}
+                    </span>
                     {currentUser.role === 'ROLE_ADMIN' ? (
                       <span className="admin-badge">Admin</span>
                     ) : (
@@ -245,6 +251,20 @@ export default function TopNav({
               </div>
 
               <div className="user-dropdown-divider" />
+
+              {(currentUser.subscriptionTier || 'FREE') === 'FREE' && currentUser.role !== 'ROLE_ADMIN' && (
+                <button
+                  type="button"
+                  className="user-dropdown-item"
+                  onClick={() => {
+                    setUserDropdownOpen(false);
+                    if (onNavigate) onNavigate('assistant');
+                  }}
+                  style={{ color: '#f59e0b', fontWeight: 600 }}
+                >
+                  <Crown size={14} className="text-amber" /> <span>Upgrade to Pro</span>
+                </button>
+              )}
 
               {currentUser.role === 'ROLE_ADMIN' && (
                 <button

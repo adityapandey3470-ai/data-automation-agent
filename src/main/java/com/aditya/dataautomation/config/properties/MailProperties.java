@@ -11,9 +11,6 @@ import org.springframework.validation.annotation.Validated;
 @ConfigurationProperties(prefix = "app.mail")
 public class MailProperties {
 
-    /**
-     * Outbound SMTP host (e.g. smtp.sendgrid.net). If blank, physical email sending is disabled.
-     */
     private String host;
 
     @Min(value = 1, message = "SMTP port must be valid")

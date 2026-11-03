@@ -18,7 +18,6 @@ public class GroupRequest {
     @NotBlank(message = "groupByColumn is required")
     private String groupByColumn;
 
-
     private String aggregationColumn;
 
     @NotBlank(message = "aggregation is required (COUNT, SUM, AVERAGE, MIN, MAX)")

@@ -21,7 +21,6 @@ import java.util.Map;
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 
-
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<ErrorResponse> handleValidationException(
             MethodArgumentNotValidException ex,
@@ -43,7 +42,6 @@ public class GlobalExceptionHandler {
         return ResponseEntity.badRequest().body(response);
     }
 
-
     @ExceptionHandler(NoResourceFoundException.class)
     public ResponseEntity<ErrorResponse> handleNotFoundException(
             NoResourceFoundException ex,
@@ -59,7 +57,6 @@ public class GlobalExceptionHandler {
 
         return ResponseEntity.status(HttpStatus.NOT_FOUND).body(response);
     }
-
 
     @ExceptionHandler(InvalidExcelFileException.class)
     public ResponseEntity<ErrorResponse> handleInvalidExcelFileException(
@@ -77,7 +74,6 @@ public class GlobalExceptionHandler {
         return ResponseEntity.badRequest().body(response);
     }
 
-
     @ExceptionHandler(MaxUploadSizeExceededException.class)
     public ResponseEntity<ErrorResponse> handleMaxUploadSizeExceededException(
             MaxUploadSizeExceededException ex,
@@ -93,7 +89,6 @@ public class GlobalExceptionHandler {
 
         return ResponseEntity.status(HttpStatus.PAYLOAD_TOO_LARGE).body(response);
     }
-
 
     @ExceptionHandler(MissingServletRequestPartException.class)
     public ResponseEntity<ErrorResponse> handleMissingServletRequestPartException(
@@ -111,8 +106,6 @@ public class GlobalExceptionHandler {
         return ResponseEntity.badRequest().body(response);
     }
 
-
-
     @ExceptionHandler(com.aditya.dataautomation.analysis.exception.AnalysisException.class)
     public ResponseEntity<ErrorResponse> handleAnalysisException(
             com.aditya.dataautomation.analysis.exception.AnalysisException ex,
@@ -129,8 +122,6 @@ public class GlobalExceptionHandler {
         return ResponseEntity.badRequest().body(response);
     }
 
-
-
     @ExceptionHandler(com.aditya.dataautomation.cleaning.exception.CleaningException.class)
     public ResponseEntity<ErrorResponse> handleCleaningException(
             com.aditya.dataautomation.cleaning.exception.CleaningException ex,
@@ -146,7 +137,6 @@ public class GlobalExceptionHandler {
 
         return ResponseEntity.badRequest().body(response);
     }
-
 
     @ExceptionHandler(com.aditya.dataautomation.dashboard.exception.DashboardException.class)
     public ResponseEntity<ErrorResponse> handleDashboardException(
@@ -231,6 +221,22 @@ public class GlobalExceptionHandler {
                 .build();
 
         return ResponseEntity.status(HttpStatus.CONFLICT).body(response);
+    }
+
+    @ExceptionHandler(QuotaExceededException.class)
+    public ResponseEntity<ErrorResponse> handleQuotaExceeded(
+            QuotaExceededException ex,
+            HttpServletRequest request) {
+
+        ErrorResponse response = ErrorResponse.builder()
+                .status(HttpStatus.TOO_MANY_REQUESTS.value())
+                .error("QUOTA_EXCEEDED")
+                .message(ex.getMessage())
+                .path(request.getRequestURI())
+                .timestamp(LocalDateTime.now())
+                .build();
+
+        return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS).body(response);
     }
 
     @ExceptionHandler(Exception.class)

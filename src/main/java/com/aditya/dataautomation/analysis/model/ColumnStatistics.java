@@ -21,12 +21,10 @@ public class ColumnStatistics {
     private final long distinctCount;
     private final Long invalidCount;
 
-
     private final Object min;
     private final Object max;
     private final Object sum;
     private final Object average;
-
 
     private final List<Map.Entry<String, Long>> topValues;
 }

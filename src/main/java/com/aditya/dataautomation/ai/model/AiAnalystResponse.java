@@ -16,8 +16,8 @@ import java.util.Map;
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public class AiAnalystResponse {
 
-    private String status; // SUCCESS, FALLBACK, UNAVAILABLE
-    private String engine; // GEMINI_AI, DETERMINISTIC_FALLBACK
+    private String status;
+    private String engine;
     private String model;
     private String answer;
     private List<DataInsight> insights;
@@ -25,4 +25,9 @@ public class AiAnalystResponse {
     private List<AiSuggestedAction> suggestedActions;
     private List<String> suggestedFollowUps;
     private Long latencyMs;
+    private String subscriptionTier;
+    private Integer queriesUsed;
+    private Integer queriesLimit;
+    private Integer remainingQueries;
+    private Integer tokensConsumed;
 }

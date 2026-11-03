@@ -69,19 +69,7 @@ public class AdminService {
         int safeSize = (size <= 0) ? DEFAULT_PAGE_SIZE : Math.min(size, MAX_PAGE_SIZE);
         Pageable pageable = PageRequest.of(safePage, safeSize, Sort.by(Sort.Direction.ASC, "id"));
 
-        return userRepository.findAll(pageable).stream().map(u -> {
-            int projectCount = (int) projectRepository.countByUserId(u.getId());
-            return AdminUserDto.builder()
-                    .id(u.getId())
-                    .name(u.getName())
-                    .email(u.getEmail())
-                    .role(u.getRole())
-                    .enabled(u.isEnabled())
-                    .projectCount(projectCount)
-                    .createdAt(u.getCreatedAt())
-                    .updatedAt(u.getUpdatedAt())
-                    .build();
-        }).collect(Collectors.toList());
+        return userRepository.findAll(pageable).stream().map(this::toAdminUserDto).collect(Collectors.toList());
     }
 
     @Transactional(readOnly = true)
@@ -93,12 +81,23 @@ public class AdminService {
         long adminUsers = all.stream().filter(u -> "ROLE_ADMIN".equals(u.getRole())).count();
         long totalProjects = projectRepository.count();
 
+        long freeUsers = all.stream().filter(u -> "FREE".equalsIgnoreCase(u.getSubscriptionTier()) || u.getSubscriptionTier() == null).count();
+        long proUsers = all.stream().filter(u -> "PRO".equalsIgnoreCase(u.getSubscriptionTier())).count();
+        long enterpriseUsers = all.stream().filter(u -> "ENTERPRISE".equalsIgnoreCase(u.getSubscriptionTier())).count();
+        long totalAiQueriesUsed = all.stream().mapToLong(u -> u.getAiQueriesUsed() != null ? u.getAiQueriesUsed() : 0).sum();
+        long totalTokensTracked = all.stream().mapToLong(u -> u.getTotalTokensUsed() != null ? u.getTotalTokensUsed() : 0L).sum();
+
         return AdminStatsDto.builder()
                 .totalUsers(totalUsers)
                 .activeUsers(activeUsers)
                 .disabledUsers(disabledUsers)
                 .adminUsers(adminUsers)
                 .totalProjects(totalProjects)
+                .freeUsers(freeUsers)
+                .proUsers(proUsers)
+                .enterpriseUsers(enterpriseUsers)
+                .totalAiQueriesUsed(totalAiQueriesUsed)
+                .totalTokensTracked(totalTokensTracked)
                 .build();
     }
 
@@ -118,17 +117,7 @@ public class AdminService {
         recordAudit(currentAdminId, currentAdminEmail, "USER_STATUS_CHANGE", "user:" + targetUserId,
                 (enabled ? "Enabled" : "Disabled") + " account for " + user.getEmail() + " (ID: " + user.getId() + ")");
 
-        int projectCount = (int) projectRepository.countByUserId(user.getId());
-        return AdminUserDto.builder()
-                .id(user.getId())
-                .name(user.getName())
-                .email(user.getEmail())
-                .role(user.getRole())
-                .enabled(user.isEnabled())
-                .projectCount(projectCount)
-                .createdAt(user.getCreatedAt())
-                .updatedAt(user.getUpdatedAt())
-                .build();
+        return toAdminUserDto(user);
     }
 
     @Transactional
@@ -152,6 +141,55 @@ public class AdminService {
         recordAudit(currentAdminId, currentAdminEmail, "USER_ROLE_CHANGE", "user:" + targetUserId,
                 "Changed role for " + user.getEmail() + " from " + oldRole + " to " + role);
 
+        return toAdminUserDto(user);
+    }
+
+    @Transactional
+    public AdminUserDto setUserSubscription(Long currentAdminId, String currentAdminEmail, Long targetUserId, String rawTier) {
+        if (rawTier == null || rawTier.isBlank()) {
+            throw new InvalidRequestException("Subscription tier cannot be empty");
+        }
+        String tier = rawTier.trim().toUpperCase();
+        if (!"FREE".equals(tier) && !"PRO".equals(tier) && !"ENTERPRISE".equals(tier)) {
+            throw new InvalidRequestException("Invalid subscription tier: " + rawTier + ". Allowed: FREE, PRO, ENTERPRISE");
+        }
+
+        User user = userRepository.findById(targetUserId)
+                .orElseThrow(() -> new InvalidRequestException("User not found: " + targetUserId));
+
+        String oldTier = user.getSubscriptionTier() != null ? user.getSubscriptionTier() : "FREE";
+        user.setSubscriptionTier(tier);
+        if ("FREE".equals(tier)) {
+            user.setAiQueriesLimit(10);
+        } else if ("PRO".equals(tier)) {
+            user.setAiQueriesLimit(500);
+        } else if ("ENTERPRISE".equals(tier)) {
+            user.setAiQueriesLimit(999999);
+        }
+        user = userRepository.save(user);
+
+        recordAudit(currentAdminId, currentAdminEmail, "SUBSCRIPTION_CHANGE", "user:" + targetUserId,
+                "Changed subscription for " + user.getEmail() + " from " + oldTier + " to " + tier);
+
+        return toAdminUserDto(user);
+    }
+
+    @Transactional
+    public AdminUserDto resetUserAiQuota(Long currentAdminId, String currentAdminEmail, Long targetUserId) {
+        User user = userRepository.findById(targetUserId)
+                .orElseThrow(() -> new InvalidRequestException("User not found: " + targetUserId));
+
+        int previousUsed = user.getAiQueriesUsed() != null ? user.getAiQueriesUsed() : 0;
+        user.setAiQueriesUsed(0);
+        user = userRepository.save(user);
+
+        recordAudit(currentAdminId, currentAdminEmail, "QUOTA_RESET", "user:" + targetUserId,
+                "Reset AI query quota for " + user.getEmail() + " (previously used: " + previousUsed + ")");
+
+        return toAdminUserDto(user);
+    }
+
+    private AdminUserDto toAdminUserDto(User user) {
         int projectCount = (int) projectRepository.countByUserId(user.getId());
         return AdminUserDto.builder()
                 .id(user.getId())
@@ -159,6 +197,10 @@ public class AdminService {
                 .email(user.getEmail())
                 .role(user.getRole())
                 .enabled(user.isEnabled())
+                .subscriptionTier(user.getSubscriptionTier() != null ? user.getSubscriptionTier().toUpperCase() : "FREE")
+                .aiQueriesUsed(user.getAiQueriesUsed() != null ? user.getAiQueriesUsed() : 0)
+                .aiQueriesLimit(user.getAiQueriesLimit() != null ? user.getAiQueriesLimit() : 10)
+                .totalTokensUsed(user.getTotalTokensUsed() != null ? user.getTotalTokensUsed() : 0L)
                 .projectCount(projectCount)
                 .createdAt(user.getCreatedAt())
                 .updatedAt(user.getUpdatedAt())
@@ -167,7 +209,7 @@ public class AdminService {
 
     @Transactional(readOnly = true)
     public List<SupportTicket> listTickets() {
-        return supportTicketRepository.findAllByOrderByCreatedAtDesc();
+        return supportTicketRepository.findTop200ByOrderByCreatedAtDesc();
     }
 
     @Transactional
@@ -278,6 +320,77 @@ public class AdminService {
 
         recordAudit(currentAdminId, currentAdminEmail, "FILE_DELETE", "file:" + fileId,
                 "Deleted file '" + fileName + "' (Owner: " + ownerInfo + ")");
+    }
+
+    @Transactional
+    public void deleteUser(Long currentAdminId, String currentAdminEmail, Long targetUserId) {
+        if (targetUserId == null) {
+            throw new InvalidRequestException("Target user ID cannot be null");
+        }
+
+        if (Long.valueOf(0L).equals(targetUserId)) {
+            throw new InvalidRequestException("Cannot delete the anonymous platform system account.");
+        }
+
+        if (currentAdminId != null && currentAdminId.equals(targetUserId)) {
+            throw new InvalidRequestException("Administrators cannot delete their own account.");
+        }
+
+        User user = userRepository.findById(targetUserId)
+                .orElseThrow(() -> new InvalidRequestException("User not found: " + targetUserId));
+
+        if ("ROLE_ADMIN".equals(user.getRole())) {
+            long adminCount = userRepository.countByRole("ROLE_ADMIN");
+            if (adminCount <= 1) {
+                throw new InvalidRequestException("Cannot delete the sole platform administrator account.");
+            }
+        }
+
+        String userEmail = user.getEmail();
+        String userName = user.getName();
+
+        userRepository.delete(user);
+        log.info("Admin id={} permanently deleted user id={} ({})", currentAdminId, targetUserId, userEmail);
+
+        recordAudit(currentAdminId, currentAdminEmail, "USER_DELETE", "user:" + targetUserId,
+                "Permanently deleted user account " + userEmail + " (Name: " + userName + ", ID: " + targetUserId + ") and all associated datasets.");
+    }
+
+    @Transactional
+    public void deleteTicket(Long currentAdminId, String currentAdminEmail, Long ticketId) {
+        if (ticketId == null) {
+            throw new InvalidRequestException("Ticket ID cannot be null");
+        }
+
+        SupportTicket ticket = supportTicketRepository.findById(ticketId)
+                .orElseThrow(() -> new InvalidRequestException("Support ticket not found: " + ticketId));
+
+        String ticketCode = ticket.getTicketCode();
+        String userEmail = ticket.getUserEmail();
+
+        supportTicketRepository.delete(ticket);
+        log.info("Admin id={} deleted support ticket code={}", currentAdminId, ticketCode);
+
+        recordAudit(currentAdminId, currentAdminEmail, "TICKET_DELETE", "ticket:" + ticketCode,
+                "Permanently deleted support ticket " + ticketCode + " (Submitted by: " + userEmail + ")");
+    }
+
+    @Transactional
+    public int pruneAuditLogs(Long currentAdminId, String currentAdminEmail, Integer days) {
+        int deletedCount;
+        if (days == null || days <= 0) {
+            deletedCount = auditLogRepository.deleteAllLogs();
+        } else {
+            java.time.LocalDateTime cutoff = java.time.LocalDateTime.now().minusDays(days);
+            deletedCount = auditLogRepository.deleteByCreatedAtBefore(cutoff);
+        }
+
+        log.info("Admin id={} pruned {} audit logs older than {} days", currentAdminId, deletedCount, days != null ? days : 0);
+
+        recordAudit(currentAdminId, currentAdminEmail, "AUDIT_PURGE", "system:audit_logs",
+                "Pruned " + deletedCount + " security audit log records older than " + (days != null && days > 0 ? days + " days" : "now") + ".");
+
+        return deletedCount;
     }
 
     @Transactional(readOnly = true)

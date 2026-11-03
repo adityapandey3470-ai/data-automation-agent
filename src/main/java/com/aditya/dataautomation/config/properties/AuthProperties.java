@@ -10,9 +10,6 @@ import org.springframework.validation.annotation.Validated;
 @ConfigurationProperties(prefix = "app.auth")
 public class AuthProperties {
 
-    /**
-     * Whether to expose password reset tokens in HTTP response bodies (only for non-prod test harness).
-     */
     private boolean exposeDevToken = false;
 
     @NotBlank(message = "Frontend URL must not be blank")

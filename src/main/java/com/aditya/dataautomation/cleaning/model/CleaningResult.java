@@ -13,30 +13,21 @@ import lombok.Getter;
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public class CleaningResult {
 
-
     private final String operation;
-
 
     private final String affectedSheet;
 
-
     private final int rowsBefore;
-
 
     private final int rowsAfter;
 
-
     private final Integer rowsRemoved;
-
 
     private final Integer cellsChanged;
 
-
     private final Integer columnCount;
 
-
     private final String message;
-
 
     @JsonIgnore
     private final ExcelWorkbookData cleanedWorkbook;

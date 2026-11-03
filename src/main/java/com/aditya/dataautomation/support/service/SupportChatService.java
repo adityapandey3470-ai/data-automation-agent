@@ -1,5 +1,6 @@
 package com.aditya.dataautomation.support.service;
 
+import com.aditya.dataautomation.admin.service.AiUsageService;
 import com.aditya.dataautomation.ai.service.GeminiClientService;
 import com.aditya.dataautomation.auth.security.UserPrincipal;
 import com.aditya.dataautomation.exception.InvalidRequestException;
@@ -20,22 +21,22 @@ public class SupportChatService {
 
     private final GeminiClientService geminiClient;
     private final SupportKnowledgeBase knowledgeBase;
+    private final AiUsageService aiUsageService;
 
-    // In-memory sliding window rate limiter: max 20 requests per minute per user
     private static final int MAX_REQUESTS_PER_MINUTE = 20;
     private final ConcurrentHashMap<Long, List<Long>> rateLimits = new ConcurrentHashMap<>();
 
     private static final String SUPPORT_SYSTEM_PROMPT = """
             You are the official AI Support Chatbot for Tabufinery SaaS.
             Your role is to guide users, troubleshoot issues, and provide clear step-by-step assistance for the Tabufinery platform.
-            
+
             RULES & CONSTRAINTS:
             1. GROUNDING: Answer strictly based on Tabufinery's actual verified features provided below. NEVER invent capabilities or claim features exist if they are not documented.
             2. DISTINCTION: You are the technical support chatbot, NOT the in-sheet AI Data Analyst. For analytical questions about workbook data rows, guide the user to the "AI Analyst & Insights" page.
             3. PRIVACY: NEVER expose another user's workbook, private datasets, user accounts, password hashes, or admin credentials.
             4. ACCURACY: If an issue cannot be resolved or is a bug, advise the user to click "Submit Ticket" or email support0912@gmail.com.
             5. FORMATTING: Use clean GitHub-flavored markdown with clear bullet points and bold highlights for UI actions. Keep answers concise, actionable, and friendly.
-            
+
             OFFICIAL KNOWLEDGE BASE:
             """ + SupportKnowledgeBase.APP_DOCUMENTATION;
 
@@ -50,7 +51,10 @@ public class SupportChatService {
         }
 
         Long userId = currentUser != null && currentUser.getId() != null ? currentUser.getId() : 0L;
+        String userEmail = currentUser != null && currentUser.getUsername() != null ? currentUser.getUsername() : "anonymous";
         checkRateLimit(userId);
+
+        long startTime = System.currentTimeMillis();
 
         List<Map<String, String>> historySnippet = new ArrayList<>();
         if (request.getHistory() != null) {
@@ -67,11 +71,15 @@ public class SupportChatService {
             }
         }
 
-        // 1. Try Gemini AI if configured
         if (geminiClient.isAvailable()) {
             try {
                 String aiReply = geminiClient.askSupport(userMessage, SUPPORT_SYSTEM_PROMPT, historySnippet);
                 if (aiReply != null && !aiReply.isBlank()) {
+                    long latency = System.currentTimeMillis() - startTime;
+                    int promptTokens = Math.max(60, (userMessage.length() + 600) / 4);
+                    int completionTokens = Math.max(40, aiReply.length() / 4);
+                    aiUsageService.recordUsage(userId > 0 ? userId : null, userEmail, "SUPPORT_CHAT", geminiClient.getModelName(), promptTokens, completionTokens, latency, "SUCCESS", userMessage);
+
                     List<String> followUps = generateFollowUps(userMessage);
                     return SupportChatResponse.builder()
                             .reply(aiReply.trim())
@@ -85,7 +93,9 @@ public class SupportChatService {
             }
         }
 
-        // 2. Deterministic Knowledge Base Fallback
+        long latency = System.currentTimeMillis() - startTime;
+        aiUsageService.recordUsage(userId > 0 ? userId : null, userEmail, "SUPPORT_CHAT", "KNOWLEDGE_BASE", 0, 0, latency, "FALLBACK", userMessage);
+
         String deterministicReply = knowledgeBase.findDeterministicAnswer(userMessage);
         List<String> followUps = generateFollowUps(userMessage);
 

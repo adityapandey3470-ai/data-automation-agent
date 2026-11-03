@@ -17,5 +17,10 @@ public class UserDto {
     private String name;
     private String role;
     private boolean enabled;
+    private boolean emailVerified;
+    private String subscriptionTier;
+    private Integer aiQueriesUsed;
+    private Integer aiQueriesLimit;
+    private Long totalTokensUsed;
     private LocalDateTime createdAt;
 }

@@ -49,7 +49,7 @@ public class AdminInitializer implements ApplicationRunner {
 
         if (existing.isPresent()) {
             User user = existing.get();
-            // Prohibit automatic privilege escalation of existing regular accounts
+
             if (!"ROLE_ADMIN".equals(user.getRole())) {
                 if (isProduction) {
                     throw new IllegalStateException(
@@ -70,13 +70,14 @@ public class AdminInitializer implements ApplicationRunner {
                 log.info("Administrator {} is already initialized. Existing password and account data preserved.", email);
             }
         } else {
-            // Provision initial administrator with BCrypt password hash
+
             User admin = User.builder()
                     .email(email)
                     .name(adminName != null && !adminName.isBlank() ? adminName.trim() : "System Administrator")
                     .passwordHash(passwordEncoder.encode(adminPassword.trim()))
                     .role("ROLE_ADMIN")
                     .enabled(true)
+                    .emailVerified(true)
                     .build();
             userRepository.save(admin);
             log.info("Secure initial administrator provisioned with ROLE_ADMIN for email={}", email);

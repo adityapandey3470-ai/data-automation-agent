@@ -22,7 +22,7 @@ public class CreateBugReportRequest {
     private String stepsToReproduce;
 
     @NotBlank(message = "Severity level is required")
-    private String severity; // Low, Medium, High, Critical
+    private String severity;
 
     private String userEmail;
 }

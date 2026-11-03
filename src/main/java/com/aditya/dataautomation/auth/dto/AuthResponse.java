@@ -13,4 +13,7 @@ public class AuthResponse {
     private String token;
     private String tokenType;
     private UserDto user;
+    private boolean emailVerificationRequired;
+    private String message;
+    private boolean smtpConfigured;
 }

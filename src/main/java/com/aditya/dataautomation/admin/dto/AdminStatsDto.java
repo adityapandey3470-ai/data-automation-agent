@@ -15,4 +15,9 @@ public class AdminStatsDto {
     private long disabledUsers;
     private long totalProjects;
     private long adminUsers;
+    private long freeUsers;
+    private long proUsers;
+    private long enterpriseUsers;
+    private long totalAiQueriesUsed;
+    private long totalTokensTracked;
 }

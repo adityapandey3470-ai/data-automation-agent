@@ -18,6 +18,5 @@ public class DuplicateRequest {
     @NotBlank(message = "sheetName is required")
     private String sheetName;
 
-
     private List<String> columns;
 }

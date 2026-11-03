@@ -65,7 +65,6 @@ public class DataCleaningServiceImpl implements DataCleaningService {
         return results;
     }
 
-
     private CleaningResult removeDuplicates(ExcelWorkbookData workbook, TransformationRequest request) {
         ExcelSheetData sheet = resolveSheet(workbook, request.getSheetName());
         DuplicateStrategy strategy = request.getDuplicateStrategy() != null
@@ -121,8 +120,6 @@ public class DataCleaningServiceImpl implements DataCleaningService {
         }
         return lastSeen.values().stream().map(this::copyRow).collect(Collectors.toList());
     }
-
-
 
     private CleaningResult handleMissingValues(ExcelWorkbookData workbook, TransformationRequest request) {
         ExcelSheetData sheet = resolveSheet(workbook, request.getSheetName());
@@ -253,8 +250,6 @@ public class DataCleaningServiceImpl implements DataCleaningService {
                 .build();
     }
 
-
-
     private CleaningResult stringClean(ExcelWorkbookData workbook, TransformationRequest request,
                                        CleaningOperation op) {
         ExcelSheetData sheet = resolveSheet(workbook, request.getSheetName());
@@ -291,8 +286,6 @@ public class DataCleaningServiceImpl implements DataCleaningService {
                 .cleanedWorkbook(newWorkbook)
                 .build();
     }
-
-
 
     private CleaningResult renameColumn(ExcelWorkbookData workbook, TransformationRequest request) {
         ExcelSheetData sheet = resolveSheet(workbook, request.getSheetName());
@@ -402,8 +395,6 @@ public class DataCleaningServiceImpl implements DataCleaningService {
                 .build();
     }
 
-
-
     private CleaningResult replaceValue(ExcelWorkbookData workbook, TransformationRequest request) {
         ExcelSheetData sheet = resolveSheet(workbook, request.getSheetName());
         String column = resolveColumn(sheet, request.getColumnName());
@@ -436,8 +427,6 @@ public class DataCleaningServiceImpl implements DataCleaningService {
                 .cleanedWorkbook(newWorkbook)
                 .build();
     }
-
-
 
     private CleaningResult convertType(ExcelWorkbookData workbook, TransformationRequest request) {
         ExcelSheetData sheet = resolveSheet(workbook, request.getSheetName());
@@ -500,7 +489,7 @@ public class DataCleaningServiceImpl implements DataCleaningService {
             }
             case DATE -> {
                 if (val instanceof LocalDate ld) yield ld.format(DATE_FMT);
-                // Try parsing as date/datetime string
+
                 try {
                     LocalDate.parse(str, DATE_FMT);
                     yield str;
@@ -529,7 +518,6 @@ public class DataCleaningServiceImpl implements DataCleaningService {
             }
         };
     }
-
 
     private void validateWorkbook(ExcelWorkbookData workbook) {
         if (workbook == null) {
@@ -568,7 +556,6 @@ public class DataCleaningServiceImpl implements DataCleaningService {
                 .collect(Collectors.toList());
     }
 
-
     private Map<String, Object> copyRow(Map<String, Object> row) {
         return new LinkedHashMap<>(row);
     }
@@ -576,7 +563,6 @@ public class DataCleaningServiceImpl implements DataCleaningService {
     private List<Map<String, Object>> deepCopyRows(List<Map<String, Object>> rows) {
         return rows.stream().map(this::copyRow).collect(Collectors.toList());
     }
-
 
     private ExcelWorkbookData replaceSheet(ExcelWorkbookData workbook, ExcelSheetData originalSheet,
                                             List<Map<String, Object>> newRows, List<String> newHeaders) {
@@ -595,7 +581,6 @@ public class DataCleaningServiceImpl implements DataCleaningService {
                 .sheets(newSheets)
                 .build();
     }
-
 
     private String fingerprint(Map<String, Object> row, List<String> columns) {
         return RowFingerprintUtil.computeFingerprint(row, columns);

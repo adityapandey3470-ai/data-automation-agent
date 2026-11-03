@@ -1,6 +1,5 @@
 import React from 'react';
 
-// Unified 24x24 Lucide-style SVG Icon Set with 1.75px stroke
 const iconProps = {
   xmlns: 'http://www.w3.org/2000/svg',
   viewBox: '0 0 24 24',
@@ -36,7 +35,7 @@ export const LogoMark = ({ size = 24, className = '', variant = 'auto' }) => {
       </defs>
 
       <rect width="32" height="32" rx="8" fill={`url(#${gradId})`} />
-      
+
       <rect
         x="0.75"
         y="0.75"
@@ -46,17 +45,17 @@ export const LogoMark = ({ size = 24, className = '', variant = 'auto' }) => {
         stroke={isLight ? "rgba(255, 255, 255, 0.4)" : "rgba(255, 255, 255, 0.2)"}
         strokeWidth="1.5"
       />
-      
+
       <rect x="5.5" y="13.5" width="6" height="5" rx="1.75" fill="white" fillOpacity={isLight ? 0.55 : 0.45} />
       <rect x="20.5" y="13.5" width="6" height="5" rx="1.75" fill="white" fillOpacity={isLight ? 0.55 : 0.45} />
-      
+
       <rect x="5.5" y="20.5" width="6" height="5" rx="1.75" fill="white" fillOpacity={isLight ? 0.3 : 0.22} />
       <rect x="20.5" y="20.5" width="6" height="5" rx="1.75" fill="white" fillOpacity={isLight ? 0.3 : 0.22} />
-      
+
       <rect x="5.5" y="6.5" width="21" height="5.25" rx="2" fill="#FFFFFF" />
-      
+
       <rect x="13" y="10" width="6" height="15.5" rx="2" fill="#FFFFFF" />
-      
+
       <path
         d="M16 14.2L16.7 16.2L18.7 17L16.7 17.8L16 19.8L15.3 17.8L13.3 17L15.3 16.2Z"
         fill={isLight ? "#047857" : "#059669"}
@@ -254,6 +253,14 @@ export const Mail = ({ size = 18, className = '' }) => (
   <svg width={size} height={size} {...iconProps} className={className}>
     <rect width="20" height="16" x="2" y="4" rx="2" />
     <path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7" />
+  </svg>
+);
+
+export const MailCheck = ({ size = 18, className = '', style = {} }) => (
+  <svg width={size} height={size} {...iconProps} className={className} style={style}>
+    <path d="M22 13V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v12c0 1.1.9 2 2 2h9" />
+    <path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7" />
+    <path d="m16 19 2 2 4-4" />
   </svg>
 );
 
@@ -543,3 +550,41 @@ export const Target = ({ size = 16, className = '' }) => (
   </svg>
 );
 
+export const Cpu = ({ size = 16, className = '' }) => (
+  <svg width={size} height={size} {...iconProps} className={className}>
+    <rect x="4" y="4" width="16" height="16" rx="2" />
+    <rect x="9" y="9" width="6" height="6" />
+    <path d="M15 2v2M9 2v2M15 20v2M9 20v2M2 15h2M2 9h2M20 15h2M20 9h2" />
+  </svg>
+);
+
+export const Activity = ({ size = 16, className = '' }) => (
+  <svg width={size} height={size} {...iconProps} className={className}>
+    <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+  </svg>
+);
+
+export const Crown = ({ size = 16, className = '' }) => (
+  <svg width={size} height={size} {...iconProps} className={className}>
+    <path d="m2 4 3 12h14l3-12-6 7-4-7-4 7-6-7zm3 16h14" />
+  </svg>
+);
+
+export const Lock = ({ size = 16, className = '' }) => (
+  <svg width={size} height={size} {...iconProps} className={className}>
+    <rect width="18" height="11" x="3" y="11" rx="2" ry="2" />
+    <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+  </svg>
+);
+
+export const Building2 = ({ size = 16, className = '' }) => (
+  <svg width={size} height={size} {...iconProps} className={className}>
+    <path d="M6 22V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v18Z" />
+    <path d="M6 12H4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h2" />
+    <path d="M18 9h2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-2" />
+    <path d="M10 6h4" />
+    <path d="M10 10h4" />
+    <path d="M10 14h4" />
+    <path d="M10 18h4" />
+  </svg>
+);
