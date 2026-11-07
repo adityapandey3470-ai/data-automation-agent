@@ -26,4 +26,8 @@ public class AnalysisResult {
     private final GroupResult groupResult;
 
     private final Object value;
+
+    private final Integer page;
+    private final Integer pageSize;
+    private final Integer totalPages;
 }

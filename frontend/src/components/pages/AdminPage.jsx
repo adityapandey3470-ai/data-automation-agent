@@ -609,42 +609,57 @@ export default function AdminPage({ currentUser }) {
             </div>
           ) : (
             <div className="admin-table-container">
-              <table className="admin-table">
+              <table className="admin-table" style={{ width: '100%', minWidth: 980 }}>
                 <thead>
                   <tr>
-                    <th>User Details</th>
-                    <th>Plan</th>
-                    <th>AI Quota & Usage</th>
-                    <th>Role</th>
-                    <th>Status</th>
-                    <th style={{ textAlign: 'center' }}>Projects</th>
-                    <th>Joined</th>
-                    <th style={{ textAlign: 'right' }}>Actions</th>
+                    <th style={{ whiteSpace: 'nowrap' }}>User Details</th>
+                    <th style={{ whiteSpace: 'nowrap' }}>Plan</th>
+                    <th style={{ whiteSpace: 'nowrap' }}>AI Quota & Usage</th>
+                    <th style={{ whiteSpace: 'nowrap' }}>Role</th>
+                    <th style={{ whiteSpace: 'nowrap' }}>Status</th>
+                    <th style={{ textAlign: 'center', whiteSpace: 'nowrap' }}>Projects</th>
+                    <th style={{ whiteSpace: 'nowrap' }}>Joined</th>
+                    <th style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {filteredUsers.map((u) => (
                     <tr key={u.id}>
-                      <td>
+                      <td style={{ whiteSpace: 'nowrap' }}>
                         <div style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{u.name}</div>
                         <div className="text-secondary" style={{ fontSize: 11 }}>{u.email}</div>
                       </td>
-                      <td>
-                        {u.subscriptionTier === 'ENTERPRISE' ? (
-                          <span className="badge badge-emerald flex-gap" style={{ fontSize: 11, padding: '3px 8px' }}>
-                            <Building2 size={12} /> Enterprise
+                      <td style={{ whiteSpace: 'nowrap' }}>
+                        <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                          <span
+                            className={`badge ${u.subscriptionTier === 'ENTERPRISE' ? 'badge-emerald' : u.subscriptionTier === 'PRO' ? 'badge-indigo' : 'badge-neutral'} flex-gap`}
+                            style={{ fontSize: 11, padding: '3px 6px', display: 'inline-flex', alignItems: 'center' }}
+                          >
+                            {u.subscriptionTier === 'ENTERPRISE' ? <Building2 size={12} /> : u.subscriptionTier === 'PRO' ? <Crown size={12} /> : <Zap size={12} />}
                           </span>
-                        ) : u.subscriptionTier === 'PRO' ? (
-                          <span className="badge badge-indigo flex-gap" style={{ fontSize: 11, padding: '3px 8px' }}>
-                            <Crown size={12} /> Pro
-                          </span>
-                        ) : (
-                          <span className="badge badge-neutral flex-gap" style={{ fontSize: 11, padding: '3px 8px' }}>
-                            <Zap size={12} /> Free
-                          </span>
-                        )}
+                          <select
+                            value={u.subscriptionTier || 'FREE'}
+                            onChange={(e) => handleUpdateSubscription(u, e.target.value)}
+                            disabled={actionLoading != null}
+                            title="Change subscription plan"
+                            style={{
+                              fontSize: 11,
+                              fontWeight: 600,
+                              padding: '3px 6px',
+                              borderRadius: 4,
+                              border: '1px solid var(--border)',
+                              background: 'var(--surface)',
+                              color: 'var(--text-primary)',
+                              cursor: 'pointer'
+                            }}
+                          >
+                            <option value="FREE">Free</option>
+                            <option value="PRO">Pro</option>
+                            <option value="ENTERPRISE">Enterprise</option>
+                          </select>
+                        </div>
                       </td>
-                      <td>
+                      <td style={{ whiteSpace: 'nowrap' }}>
                         <div style={{ fontSize: 12, fontWeight: 600 }}>
                           {u.subscriptionTier === 'ENTERPRISE' ? 'Unlimited' : `${u.aiQueriesUsed || 0} / ${u.aiQueriesLimit || 10}`}
                         </div>
@@ -652,44 +667,33 @@ export default function AdminPage({ currentUser }) {
                           {u.totalTokensUsed ? `${Number(u.totalTokensUsed).toLocaleString()} tokens` : '0 tokens'}
                         </div>
                       </td>
-                      <td>
+                      <td style={{ whiteSpace: 'nowrap' }}>
                         <span className={`badge ${u.role === 'ROLE_ADMIN' ? 'admin-badge' : 'badge-neutral'}`}>
                           {u.role === 'ROLE_ADMIN' ? 'Administrator' : 'Standard User'}
                         </span>
                       </td>
-                      <td>
+                      <td style={{ whiteSpace: 'nowrap' }}>
                         <span className={`badge ${u.enabled ? 'badge-success' : 'badge-warning'}`} style={{ color: u.enabled ? 'var(--emerald)' : '#ef4444' }}>
                           {u.enabled ? 'Active' : 'Disabled'}
                         </span>
                       </td>
-                      <td style={{ textAlign: 'center' }}>
+                      <td style={{ textAlign: 'center', whiteSpace: 'nowrap' }}>
                         <span style={{ fontWeight: 600 }}>{u.projectCount}</span>
                       </td>
-                      <td>
+                      <td style={{ whiteSpace: 'nowrap' }}>
                         <span className="text-secondary" style={{ fontSize: 12 }}>
                           {u.createdAt ? new Date(u.createdAt).toLocaleDateString() : 'N/A'}
                         </span>
                       </td>
-                      <td style={{ textAlign: 'right' }}>
-                        <div className="admin-action-group">
-                          <select
-                            value={u.subscriptionTier || 'FREE'}
-                            onChange={(e) => handleUpdateSubscription(u, e.target.value)}
-                            disabled={actionLoading != null}
-                            title="Change subscription plan"
-                            style={{ fontSize: 11, padding: '3px 6px', borderRadius: 4, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text-primary)', cursor: 'pointer' }}
-                          >
-                            <option value="FREE">Plan: Free</option>
-                            <option value="PRO">Plan: Pro</option>
-                            <option value="ENTERPRISE">Plan: Enterprise</option>
-                          </select>
-
+                      <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                        <div className="admin-action-group" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, flexWrap: 'nowrap', justifyContent: 'flex-end', whiteSpace: 'nowrap' }}>
                           {(u.aiQueriesUsed || 0) > 0 && (
                             <button
                               className="btn btn-xs btn-outline"
                               onClick={() => handleResetQuota(u)}
                               disabled={actionLoading != null}
                               title="Reset AI query quota back to 0"
+                              style={{ whiteSpace: 'nowrap' }}
                             >
                               {actionLoading === `reset-${u.id}` ? <div className="spinner" /> : 'Reset Quota'}
                             </button>
@@ -700,6 +704,7 @@ export default function AdminPage({ currentUser }) {
                             onClick={() => handleToggleRole(u)}
                             disabled={actionLoading != null || u.id === currentUser?.id}
                             title={u.role === 'ROLE_ADMIN' ? 'Demote to Standard User' : 'Promote to Administrator'}
+                            style={{ whiteSpace: 'nowrap' }}
                           >
                             {actionLoading === `role-${u.id}` ? (
                               <div className="spinner" />
@@ -712,7 +717,7 @@ export default function AdminPage({ currentUser }) {
                             className={`btn btn-xs ${u.enabled ? 'btn-outline' : 'btn-primary'}`}
                             onClick={() => handleToggleStatus(u)}
                             disabled={actionLoading != null || u.id === currentUser?.id}
-                            style={u.enabled ? { color: '#ef4444', borderColor: '#ef4444' } : {}}
+                            style={{ whiteSpace: 'nowrap', ...(u.enabled ? { color: '#ef4444', borderColor: '#ef4444' } : {}) }}
                             title={u.enabled ? 'Disable user access' : 'Enable user access'}
                           >
                             {actionLoading === `status-${u.id}` ? (
@@ -726,7 +731,7 @@ export default function AdminPage({ currentUser }) {
                             className="btn btn-xs btn-outline"
                             onClick={() => handleDeleteUser(u)}
                             disabled={actionLoading != null || u.id === currentUser?.id}
-                            style={{ color: '#ef4444', borderColor: '#ef4444' }}
+                            style={{ color: '#ef4444', borderColor: '#ef4444', whiteSpace: 'nowrap' }}
                             title={u.id === currentUser?.id ? 'Cannot delete yourself' : 'Permanently delete user'}
                           >
                             {actionLoading === `delete-user-${u.id}` ? (

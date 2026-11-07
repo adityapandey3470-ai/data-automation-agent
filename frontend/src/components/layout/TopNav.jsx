@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { getHealth } from '../../services/api';
-import { Search, FileSpreadsheet, Menu, Folder, User, LogOut, Shield, ChevronDown, Sliders, Crown } from '../icons/Icons';
+import { Search, FileSpreadsheet, Menu, Folder, User, LogOut, Shield, ChevronDown, Sliders, Crown, X } from '../icons/Icons';
 
 export default function TopNav({
   title,
@@ -19,6 +19,7 @@ export default function TopNav({
   const [backendHealth, setBackendHealth] = useState('checking');
   const [userDropdownOpen, setUserDropdownOpen] = useState(false);
   const [fileDropdownOpen, setFileDropdownOpen] = useState(false);
+  const [commandQuery, setCommandQuery] = useState('');
   const dropdownRef = useRef(null);
   const fileDropdownRef = useRef(null);
 
@@ -87,14 +88,14 @@ export default function TopNav({
         <Menu size={18} />
       </button>
 
-      <div className="topnav-left">
-        <span className="topnav-title">{title}</span>
+      <div className="topnav-left" style={{ minWidth: 0, flexShrink: 1, display: 'flex', alignItems: 'center', gap: 10 }}>
+        <span className="topnav-title" style={{ flexShrink: 0 }}>{title}</span>
         {loaded && (
-          <div className="relative" ref={fileDropdownRef} style={{ position: 'relative' }}>
+          <div className="relative" ref={fileDropdownRef} style={{ position: 'relative', minWidth: 0, flexShrink: 1 }}>
             <button
               className="topnav-file-tag flex-gap"
               onClick={() => setFileDropdownOpen(prev => !prev)}
-              title="Click to view workspace files"
+              title={fileName ? `Workspace file: ${fileName}` : 'Click to view workspace files'}
               style={{
                 cursor: 'pointer',
                 background: 'var(--bg-card)',
@@ -102,13 +103,15 @@ export default function TopNav({
                 borderRadius: '6px',
                 padding: '4px 8px',
                 display: 'inline-flex',
-                alignItems: 'center'
+                alignItems: 'center',
+                maxWidth: 'clamp(110px, 20vw, 220px)',
+                minWidth: 0
               }}
             >
               <FileSpreadsheet size={13} className="text-emerald" style={{ flexShrink: 0 }} />
-              <span className="topnav-file-name">{fileName}</span>
+              <span className="topnav-file-name" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0, flex: '1 1 auto' }}>{fileName}</span>
               {workspaceFiles.length > 1 && (
-                <span className="badge badge-neutral" style={{ fontSize: 10, padding: '1px 5px', marginLeft: 4 }}>
+                <span className="badge badge-neutral" style={{ fontSize: 10, padding: '1px 5px', marginLeft: 4, flexShrink: 0, whiteSpace: 'nowrap' }}>
                   {workspaceFiles.length} files ▾
                 </span>
               )}
@@ -188,11 +191,31 @@ export default function TopNav({
         <input
           id="topnav-command-search"
           name="commandSearch"
-          type="search"
+          type="text"
           placeholder="Search commands, operations..."
           aria-label="Search commands, operations"
           autoComplete="off"
+          value={commandQuery}
+          onChange={e => setCommandQuery(e.target.value)}
         />
+        {commandQuery && (
+          <button
+            type="button"
+            onClick={() => setCommandQuery('')}
+            style={{
+              background: 'none',
+              border: 'none',
+              padding: 0,
+              cursor: 'pointer',
+              color: 'var(--text-secondary)',
+              display: 'flex',
+              alignItems: 'center',
+            }}
+            title="Clear search"
+          >
+            <X size={12} />
+          </button>
+        )}
       </div>
 
       <div className={`topnav-status ${backendHealth === 'up' ? 'online' : 'offline'}`} title={`Backend Engine: ${backendHealth}`}>
@@ -235,13 +258,8 @@ export default function TopNav({
                 <div className="user-dropdown-meta">
                   <div className="user-dropdown-name">
                     <span>{currentUser.name}</span>
-                    <span className={`topnav-user-tier-badge tier-${(currentUser.subscriptionTier || 'FREE').toLowerCase()}`}>
-                      {currentUser.subscriptionTier || 'FREE'}
-                    </span>
-                    {currentUser.role === 'ROLE_ADMIN' ? (
+                    {currentUser.role === 'ROLE_ADMIN' && (
                       <span className="admin-badge">Admin</span>
-                    ) : (
-                      <span className="member-badge">Member</span>
                     )}
                   </div>
                   <div className="user-dropdown-email" title={currentUser.email}>

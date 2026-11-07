@@ -25,42 +25,7 @@ public class WorkbookController {
     @Operation(summary = "Check if a workbook is loaded and get history state")
     public ResponseEntity<Map<String, Object>> getStatus() {
         try {
-            ExcelWorkbookData workbook = workbookSessionHolder.get();
-            String activeFileId = workbookSessionHolder.getActiveFileId();
-            if (workbook == null) {
-                Map<String, Object> emptyResp = new LinkedHashMap<>();
-                emptyResp.put("loaded", false);
-                emptyResp.put("canUndo", false);
-                emptyResp.put("canRedo", false);
-                emptyResp.put("fileId", null);
-                emptyResp.put("files", workbookSessionHolder.listWorkbooks());
-                return ResponseEntity.ok(emptyResp);
-            }
-
-            List<Map<String, Object>> sheetSummaries = new ArrayList<>();
-            if (workbook.getSheets() != null) {
-                for (ExcelSheetData sheet : workbook.getSheets()) {
-                    if (sheet == null) continue;
-                    Map<String, Object> info = new LinkedHashMap<>();
-                    info.put("sheetName", sheet.getSheetName() != null ? sheet.getSheetName() : "");
-                    info.put("rowCount", sheet.getRowCount());
-                    info.put("columnCount", sheet.getColumnCount());
-                    info.put("headers", sheet.getHeaders() != null ? sheet.getHeaders() : Collections.emptyList());
-                    sheetSummaries.add(info);
-                }
-            }
-
-            Map<String, Object> response = new LinkedHashMap<>();
-            response.put("loaded", true);
-            response.put("fileId", activeFileId);
-            response.put("fileName", workbook.getFileName() != null ? workbook.getFileName() : "Active Workbook");
-            response.put("sheets", sheetSummaries);
-            response.put("canUndo", workbookSessionHolder.canUndo());
-            response.put("canRedo", workbookSessionHolder.canRedo());
-            response.put("undoAction", workbookSessionHolder.getUndoAction() != null ? workbookSessionHolder.getUndoAction() : "");
-            response.put("redoAction", workbookSessionHolder.getRedoAction() != null ? workbookSessionHolder.getRedoAction() : "");
-            response.put("files", workbookSessionHolder.listWorkbooks());
-            return ResponseEntity.ok(response);
+            return ResponseEntity.ok(workbookSessionHolder.getStatusMap());
         } catch (Exception ex) {
             log.error("Error retrieving workbook status: {}", ex.getMessage(), ex);
             Map<String, Object> fallback = new LinkedHashMap<>();
@@ -189,19 +154,16 @@ public class WorkbookController {
     @PostMapping("/files/{fileId}/select")
     @Operation(summary = "Switch the active workbook in the current user's workspace")
     public ResponseEntity<Map<String, Object>> selectFile(@PathVariable String fileId) {
-        boolean selected = workbookSessionHolder.setActiveWorkbook(fileId);
-        if (!selected) {
+        Map<String, Object> status = workbookSessionHolder.selectAndGetStatus(fileId);
+        if (status == null) {
             Map<String, Object> err = new LinkedHashMap<>();
             err.put("success", false);
             err.put("error", "File not found or access denied");
             return ResponseEntity.status(404).body(err);
         }
-        ExcelWorkbookData active = workbookSessionHolder.get();
-        Map<String, Object> resp = new LinkedHashMap<>();
-        resp.put("success", true);
-        resp.put("fileId", fileId);
-        resp.put("fileName", active != null ? active.getFileName() : "Active Workbook");
-        return ResponseEntity.ok(resp);
+        status.put("success", true);
+        status.put("fileId", fileId);
+        return ResponseEntity.ok(status);
     }
 
     @DeleteMapping("/files/{fileId}")

@@ -54,6 +54,9 @@ public class JwtService {
 
     public boolean validateToken(String token) {
         try {
+            if (token == null) {
+                return false;
+            }
             String[] parts = token.split("\\.");
             if (parts.length != 3) return false;
 
@@ -65,7 +68,11 @@ public class JwtService {
             byte[] payloadBytes = Base64.getUrlDecoder().decode(parts[1]);
             Map<?, ?> claims = objectMapper.readValue(payloadBytes, Map.class);
             long exp = ((Number) claims.get("exp")).longValue();
-            return Instant.now().getEpochSecond() < exp;
+            if (Instant.now().getEpochSecond() >= exp) {
+                return false;
+            }
+
+            return true;
         } catch (Exception e) {
             return false;
         }
@@ -93,6 +100,13 @@ public class JwtService {
         } catch (Exception e) {
             return null;
         }
+    }
+
+    public Long extractIssuedAt(String token) {
+        Map<?, ?> claims = extractAllClaimsIfValid(token);
+        if (claims == null) return null;
+        Object iat = claims.get("iat");
+        return iat instanceof Number n ? n.longValue() : null;
     }
 
     public String extractEmail(String token) {

@@ -21,6 +21,9 @@ public class SortRequest {
     @NotEmpty(message = "At least one sort condition is required")
     private List<SortConditionDto> sortBy;
 
+    private Integer page;
+    private Integer pageSize;
+
     @Getter
     @Setter
     @NoArgsConstructor

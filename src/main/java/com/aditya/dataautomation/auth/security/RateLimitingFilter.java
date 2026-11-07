@@ -98,6 +98,14 @@ public class RateLimitingFilter extends OncePerRequestFilter {
             }
         }
 
+        if (path.startsWith("/api/v1/support/bug-report")) {
+            res = rateLimiterService.tryAcquireWithResult("bug-report:" + clientIp, 5, 300);
+            if (!res.allowed()) {
+                rejectRateLimit(response, path, "Bug report submission limit reached. Please wait a few minutes.", res.retryAfterSeconds());
+                return;
+            }
+        }
+
         filterChain.doFilter(request, response);
     }
 
@@ -111,7 +119,13 @@ public class RateLimitingFilter extends OncePerRequestFilter {
         if (isTrustedProxy(remoteAddr)) {
             String xf = request.getHeader("X-Forwarded-For");
             if (xf != null && !xf.isBlank()) {
-                return xf.split(",")[0].trim();
+                String[] parts = xf.split(",");
+                for (int i = parts.length - 1; i >= 0; i--) {
+                    String candidate = parts[i].trim();
+                    if (!candidate.isBlank() && !isTrustedProxy(candidate)) {
+                        return candidate;
+                    }
+                }
             }
         }
 

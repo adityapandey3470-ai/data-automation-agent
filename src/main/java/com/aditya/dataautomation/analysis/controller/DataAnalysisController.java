@@ -60,13 +60,38 @@ public class DataAnalysisController {
                 .toList();
 
         List<Map<String, Object>> filtered = analysisService.filter(sheet, conditions);
+        int totalFiltered = filtered.size();
+
+        Integer rawPage = request.getPage();
+        int pageSize = Math.max(1, Math.min(request.getPageSize() != null ? request.getPageSize() : 100, 500));
+        Integer totalPages = (int) Math.ceil((double) totalFiltered / pageSize);
+        List<Map<String, Object>> resultRows;
+        Integer returnPage;
+        Integer returnPageSize;
+
+        if (rawPage != null) {
+            int page = Math.max(0, rawPage);
+            int fromIndex = Math.min(page * pageSize, totalFiltered);
+            int toIndex = Math.min(fromIndex + pageSize, totalFiltered);
+            resultRows = filtered.subList(fromIndex, toIndex);
+            returnPage = page;
+            returnPageSize = pageSize;
+        } else {
+            int cappedSize = Math.min(totalFiltered, 1000);
+            resultRows = filtered.subList(0, cappedSize);
+            returnPage = 0;
+            returnPageSize = cappedSize;
+        }
 
         return ResponseEntity.ok(AnalysisResult.builder()
                 .operation("FILTER")
                 .sheetName(sheet.getSheetName())
                 .totalRows(sheet.getRowCount())
-                .resultRows(filtered.size())
-                .rows(filtered)
+                .resultRows(totalFiltered)
+                .page(returnPage)
+                .pageSize(returnPageSize)
+                .totalPages(totalPages)
+                .rows(resultRows)
                 .build());
     }
 
@@ -84,13 +109,38 @@ public class DataAnalysisController {
                 .toList();
 
         List<Map<String, Object>> sorted = analysisService.sort(sheet, conditions);
+        int totalSorted = sorted.size();
+
+        Integer rawPage = request.getPage();
+        int pageSize = Math.max(1, Math.min(request.getPageSize() != null ? request.getPageSize() : 100, 500));
+        Integer totalPages = (int) Math.ceil((double) totalSorted / pageSize);
+        List<Map<String, Object>> resultRows;
+        Integer returnPage;
+        Integer returnPageSize;
+
+        if (rawPage != null) {
+            int page = Math.max(0, rawPage);
+            int fromIndex = Math.min(page * pageSize, totalSorted);
+            int toIndex = Math.min(fromIndex + pageSize, totalSorted);
+            resultRows = sorted.subList(fromIndex, toIndex);
+            returnPage = page;
+            returnPageSize = pageSize;
+        } else {
+            int cappedSize = Math.min(totalSorted, 1000);
+            resultRows = sorted.subList(0, cappedSize);
+            returnPage = 0;
+            returnPageSize = cappedSize;
+        }
 
         return ResponseEntity.ok(AnalysisResult.builder()
                 .operation("SORT")
                 .sheetName(sheet.getSheetName())
                 .totalRows(sheet.getRowCount())
-                .resultRows(sorted.size())
-                .rows(sorted)
+                .resultRows(totalSorted)
+                .page(returnPage)
+                .pageSize(returnPageSize)
+                .totalPages(totalPages)
+                .rows(resultRows)
                 .build());
     }
 

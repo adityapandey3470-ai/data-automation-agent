@@ -1,11 +1,42 @@
-import React from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Upload, FileSpreadsheet, Sparkles, LineChart, Download,
-  ArrowRight, Sliders, Table2
+  ArrowRight, Sliders, Table2, RefreshCw
 } from '../icons/Icons';
 import { formatMetricNumber } from '../../utils/numberFormat';
+import { dashboardWs } from '../../services/websocket';
 
-export default function DashboardPage({ loaded, fileInfo, activeSheet, onNavigate, currentUser, onRequestAuth }) {
+export default function DashboardPage({ loaded, fileInfo, activeSheet, onNavigate, currentUser, onRequestAuth, onRefresh }) {
+  const [liveSync, setLiveSync] = useState(true);
+  const [secondsUntilSync, setSecondsUntilSync] = useState(30);
+  const timerRef = useRef(null);
+
+  useEffect(() => {
+    const unsubscribe = dashboardWs.subscribe((event) => {
+      if (onRefresh) {
+        onRefresh();
+      }
+    });
+    return () => {
+      unsubscribe();
+    };
+  }, [onRefresh]);
+
+  useEffect(() => {
+    if (!liveSync) return;
+    const interval = setInterval(() => {
+      setSecondsUntilSync((prev) => {
+        if (prev <= 1) {
+          if (onRefresh) onRefresh();
+          return 30;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+    timerRef.current = interval;
+    return () => clearInterval(interval);
+  }, [liveSync, onRefresh]);
+
   const totalRows = loaded
     ? fileInfo.sheets?.reduce((acc, s) => acc + (s.rowCount || 0), 0) || 0
     : 0;
@@ -25,7 +56,35 @@ export default function DashboardPage({ loaded, fileInfo, activeSheet, onNavigat
           <h1>Executive Overview</h1>
           <p>Automate spreadsheet ingestion, deterministic data cleaning, and instant analytics.</p>
         </div>
-        <div className="flex-gap">
+        <div className="flex-gap" style={{ alignItems: 'center' }}>
+          <button
+            onClick={() => setLiveSync(!liveSync)}
+            title={liveSync ? 'Live 30s Sync Active (click to pause)' : 'Live Sync Paused'}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '8px',
+              background: 'rgba(255,255,255,0.04)',
+              border: '1px solid rgba(255,255,255,0.1)',
+              padding: '6px 12px',
+              borderRadius: '8px',
+              fontSize: '12px',
+              fontWeight: 600,
+              color: 'var(--text-primary)',
+              cursor: 'pointer'
+            }}
+          >
+            <span
+              style={{
+                width: '8px',
+                height: '8px',
+                borderRadius: '50%',
+                background: liveSync ? '#10b981' : '#64748b',
+                boxShadow: liveSync ? '0 0 8px rgba(16,185,129,0.8)' : 'none'
+              }}
+            />
+            {liveSync ? `30s Sync (${secondsUntilSync}s)` : 'Sync Paused'}
+          </button>
           <button className="btn btn-primary" onClick={handleUploadClick}>
             <Upload size={15} /> {loaded ? 'Switch / Upload File' : 'Upload Dataset'}
           </button>

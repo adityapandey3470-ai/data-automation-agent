@@ -178,24 +178,47 @@ public class DataCleaningController {
     @Operation(summary = "Execute multiple cleaning operations sequentially",
             description = "Each operation's output becomes the next operation's input. Original data is not modified.")
     public ResponseEntity<List<CleaningResult>> transform(@RequestBody List<TransformationRequest> requests) {
+        if (requests == null || requests.isEmpty()) {
+            throw new CleaningException("Transformation pipeline cannot be empty");
+        }
+        if (requests.size() > 50) {
+            throw new CleaningException("Batch transformation pipeline is limited to a maximum of 50 operations per request");
+        }
+
+        Long baseVersion = requests.get(0).getBaseVersion();
+        if (baseVersion == null) {
+            throw new CleaningException("baseVersion is required. Reload the workbook and retry.");
+        }
+
         ExcelWorkbookData workbook = getWorkbookOrThrow();
         List<CleaningResult> results = cleaningService.executePipeline(workbook, requests);
 
         if (!results.isEmpty()) {
-            workbookSessionHolder.store(
+            workbookSessionHolder.storeIfVersionMatches(
                     results.get(results.size() - 1).getCleanedWorkbook(),
-                    "Batch Pipeline (" + requests.size() + " steps)"
+                    "Batch Pipeline (" + requests.size() + " steps)",
+                    baseVersion
             );
+            Long updatedVersion = workbookSessionHolder.getActiveVersion();
+            for (CleaningResult r : results) {
+                r.setVersion(updatedVersion);
+            }
         }
 
         return ResponseEntity.ok(results);
     }
 
     private ResponseEntity<CleaningResult> executeAndStore(TransformationRequest request) {
+        Long baseVersion = request.getBaseVersion();
+        if (baseVersion == null) {
+            throw new CleaningException("baseVersion is required. Reload the workbook and retry.");
+        }
+
         ExcelWorkbookData workbook = getWorkbookOrThrow();
         CleaningResult result = cleaningService.execute(workbook, request);
         String actionDesc = formatActionDescription(request);
-        workbookSessionHolder.store(result.getCleanedWorkbook(), actionDesc);
+        workbookSessionHolder.storeIfVersionMatches(result.getCleanedWorkbook(), actionDesc, baseVersion);
+        result.setVersion(workbookSessionHolder.getActiveVersion());
         return ResponseEntity.ok(result);
     }
 

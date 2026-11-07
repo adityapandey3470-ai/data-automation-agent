@@ -21,6 +21,9 @@ public class FilterRequest {
     @NotEmpty(message = "At least one filter condition is required")
     private List<FilterConditionDto> conditions;
 
+    private Integer page;
+    private Integer pageSize;
+
     @Getter
     @Setter
     @NoArgsConstructor

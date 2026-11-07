@@ -1,5 +1,6 @@
 package com.aditya.dataautomation.support.dto;
 
+import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 import lombok.AllArgsConstructor;
@@ -24,5 +25,7 @@ public class CreateBugReportRequest {
     @NotBlank(message = "Severity level is required")
     private String severity;
 
+    @Email(message = "Invalid email format")
+    @Size(max = 255, message = "Email cannot exceed 255 characters")
     private String userEmail;
 }

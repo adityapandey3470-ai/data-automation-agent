@@ -1,5 +1,6 @@
 package com.aditya.dataautomation.support.dto;
 
+import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 import lombok.AllArgsConstructor;
@@ -20,6 +21,8 @@ public class SupportChatRequest {
     @Size(max = 1000, message = "Message must not exceed 1000 characters")
     private String message;
 
+    @Valid
+    @Size(max = 10, message = "Chat history is too long")
     @Builder.Default
     private List<ChatMessage> history = new ArrayList<>();
 }

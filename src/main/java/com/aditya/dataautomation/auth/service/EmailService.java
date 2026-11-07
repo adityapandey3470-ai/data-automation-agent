@@ -2,7 +2,9 @@ package com.aditya.dataautomation.auth.service;
 
 import com.aditya.dataautomation.config.properties.MailProperties;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
+import org.springframework.web.util.HtmlUtils;
 
 import javax.net.ssl.SSLSocket;
 import javax.net.ssl.SSLSocketFactory;
@@ -29,10 +31,10 @@ public class EmailService {
         return host != null && !host.isBlank() && !host.equalsIgnoreCase("localhost.disabled");
     }
 
+    @Async
     public boolean sendVerificationEmail(String recipientEmail, String recipientName, String verificationLink) {
         if (!isSmtpConfigured()) {
-            log.info("SMTP host not configured (app.mail.host). Skipping physical email delivery. Verification link for {}: {}",
-                    recipientEmail, verificationLink);
+            log.info("SMTP host not configured (app.mail.host). Skipping physical email delivery for {}", recipientEmail);
             return false;
         }
 
@@ -50,10 +52,10 @@ public class EmailService {
         }
     }
 
+    @Async
     public boolean sendPasswordResetEmail(String recipientEmail, String resetLink) {
         if (!isSmtpConfigured()) {
-            log.info("SMTP host not configured (app.mail.host). Skipping physical email delivery. Reset link for {}: {}",
-                    recipientEmail, resetLink);
+            log.info("SMTP host not configured (app.mail.host). Skipping physical email delivery for {}", recipientEmail);
             return false;
         }
 
@@ -71,6 +73,45 @@ public class EmailService {
         }
     }
 
+    @Async
+    public boolean sendAccountAlreadyExistsEmail(String recipientEmail, String recipientName) {
+        if (!isSmtpConfigured()) return false;
+        try {
+            String subject = "Security Notice: Registration attempt on Tabufinery";
+            String safeName = HtmlUtils.htmlEscape(recipientName != null ? recipientName : "there");
+            String bodyHtml = "<html><body style='font-family:sans-serif;color:#1e293b;'>"
+                    + "<p>Hi " + safeName + ",</p>"
+                    + "<p>Someone recently attempted to create a new Tabufinery account using your email address (<strong>"
+                    + HtmlUtils.htmlEscape(recipientEmail) + "</strong>).</p>"
+                    + "<p>If this was you, you can simply log in or reset your password if you forgot it.</p>"
+                    + "<p>If you did not make this request, you can safely ignore this email.</p>"
+                    + "</body></html>";
+            sendSmtpMessage(recipientEmail, subject, bodyHtml);
+            return true;
+        } catch (Exception e) {
+            log.warn("Failed to send account already exists notice to {}: {}", recipientEmail, e.getMessage());
+            return false;
+        }
+    }
+
+    @Async
+    public boolean sendAccountLockoutAlert(String recipientEmail) {
+        if (!isSmtpConfigured()) return false;
+        try {
+            String subject = "Security Alert: Account temporarily locked - Tabufinery";
+            String bodyHtml = "<html><body style='font-family:sans-serif;color:#1e293b;'>"
+                    + "<p>Hello,</p>"
+                    + "<p>Your Tabufinery account was temporarily locked for 15 minutes due to multiple failed login attempts.</p>"
+                    + "<p>If this was not you, we strongly recommend that you reset your password immediately after the lockout expires.</p>"
+                    + "</body></html>";
+            sendSmtpMessage(recipientEmail, subject, bodyHtml);
+            return true;
+        } catch (Exception e) {
+            log.warn("Failed to send lockout alert to {}: {}", recipientEmail, e.getMessage());
+            return false;
+        }
+    }
+
     private void sendSmtpMessage(String to, String subject, String bodyHtml) throws Exception {
         String host = mailProperties.getHost();
         int port = mailProperties.getPort();
@@ -78,8 +119,22 @@ public class EmailService {
         String password = mailProperties.getPassword();
         String from = mailProperties.getFrom();
 
-        try (Socket socket = new Socket(host, port)) {
-            socket.setSoTimeout(15000);
+        Socket rawSocket = new Socket();
+        rawSocket.connect(new java.net.InetSocketAddress(host, port), 10000);
+        rawSocket.setSoTimeout(15000);
+        Socket activeSocket = rawSocket;
+
+        if (port == 465) {
+            SSLSocketFactory sslFactory = (SSLSocketFactory) SSLSocketFactory.getDefault();
+            SSLSocket sslSocket = (SSLSocket) sslFactory.createSocket(rawSocket, host, port, true);
+            javax.net.ssl.SSLParameters sslParams = sslSocket.getSSLParameters();
+            sslParams.setEndpointIdentificationAlgorithm("HTTPS");
+            sslSocket.setSSLParameters(sslParams);
+            sslSocket.startHandshake();
+            activeSocket = sslSocket;
+        }
+
+        try (Socket socket = activeSocket) {
             BufferedReader reader = new BufferedReader(new InputStreamReader(socket.getInputStream(), StandardCharsets.UTF_8));
             BufferedWriter writer = new BufferedWriter(new OutputStreamWriter(socket.getOutputStream(), StandardCharsets.UTF_8));
 
@@ -90,17 +145,22 @@ public class EmailService {
             if (port == 587 || port == 25) {
                 sendCommand(writer, "STARTTLS");
                 String startTlsReply = readReply(reader);
-                if (startTlsReply.startsWith("220")) {
-                    SSLSocketFactory sslSocketFactory = (SSLSocketFactory) SSLSocketFactory.getDefault();
-                    SSLSocket sslSocket = (SSLSocket) sslSocketFactory.createSocket(socket, host, port, true);
-                    sslSocket.startHandshake();
-
-                    reader = new BufferedReader(new InputStreamReader(sslSocket.getInputStream(), StandardCharsets.UTF_8));
-                    writer = new BufferedWriter(new OutputStreamWriter(sslSocket.getOutputStream(), StandardCharsets.UTF_8));
-
-                    sendCommand(writer, "EHLO " + host);
-                    readEhlo(reader);
+                if (!startTlsReply.startsWith("220")) {
+                    throw new RuntimeException("SMTP STARTTLS command failed: " + startTlsReply);
                 }
+
+                SSLSocketFactory sslSocketFactory = (SSLSocketFactory) SSLSocketFactory.getDefault();
+                SSLSocket sslSocket = (SSLSocket) sslSocketFactory.createSocket(socket, host, port, true);
+                javax.net.ssl.SSLParameters sslParams = sslSocket.getSSLParameters();
+                sslParams.setEndpointIdentificationAlgorithm("HTTPS");
+                sslSocket.setSSLParameters(sslParams);
+                sslSocket.startHandshake();
+
+                reader = new BufferedReader(new InputStreamReader(sslSocket.getInputStream(), StandardCharsets.UTF_8));
+                writer = new BufferedWriter(new OutputStreamWriter(sslSocket.getOutputStream(), StandardCharsets.UTF_8));
+
+                sendCommand(writer, "EHLO " + host);
+                readEhlo(reader);
             }
 
             if (username != null && !username.isBlank() && password != null && !password.isBlank()) {
@@ -169,7 +229,7 @@ public class EmailService {
     }
 
     private String buildVerificationEmailHtml(String name, String link) {
-        String displayName = (name != null && !name.isBlank()) ? name : "User";
+        String displayName = (name != null && !name.isBlank()) ? HtmlUtils.htmlEscape(name) : "User";
         return "<!DOCTYPE html><html><head><meta charset='UTF-8'></head>"
                 + "<body style='font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif;background-color:#0f172a;color:#f8fafc;padding:32px 16px;margin:0;'>"
                 + "<div style='max-width:540px;margin:0 auto;background:#1e293b;border:1px solid #334155;border-radius:12px;padding:32px;box-shadow:0 10px 25px rgba(0,0,0,0.3);'>"

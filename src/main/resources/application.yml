@@ -13,8 +13,8 @@ spring:
     password: ${DB_PASSWORD}
     driver-class-name: ${DB_DRIVER:org.h2.Driver}
     hikari:
-      maximum-pool-size: 10
-      minimum-idle: 5
+      maximum-pool-size: 30
+      minimum-idle: 10
       idle-timeout: 30000
       connection-timeout: 20000
       max-lifetime: 1800000
@@ -35,7 +35,7 @@ spring:
     enabled: true
     baseline-on-migrate: true
     locations: classpath:db/migration
-    validate-on-migrate: false
+    validate-on-migrate: ${FLYWAY_VALIDATE_ON_MIGRATE:false}
 
 
   servlet:
@@ -66,10 +66,10 @@ info:
 
 springdoc:
   api-docs:
-    enabled: ${SPRINGDOC_ENABLED:true}
+    enabled: ${SPRINGDOC_ENABLED:false}
     path: /api-docs
   swagger-ui:
-    enabled: ${SPRINGDOC_ENABLED:true}
+    enabled: ${SPRINGDOC_ENABLED:false}
     path: /swagger-ui.html
     operationsSorter: method
 
@@ -84,7 +84,7 @@ app:
     preview-rows: 10
   jwt:
     secret: ${JWT_SECRET}
-    expiration-hours: ${JWT_EXPIRATION_HOURS:72}
+    expiration-hours: ${JWT_EXPIRATION_HOURS:24}
   cors:
     allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173,http://192.168.29.46:5173}
   auth:

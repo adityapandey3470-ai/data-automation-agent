@@ -1,5 +1,5 @@
 import React from 'react';
-import { LogoMark, LayoutDashboard, Table2, Sparkles, LineChart, Download, Settings, X, EngineCore, Shield } from '../icons/Icons';
+import { LogoMark, LayoutDashboard, Table2, Sparkles, LineChart, Download, Settings, X, EngineCore, Shield, Users } from '../icons/Icons';
 
 export default function Sidebar({ activePage, onNavigate, isMobileOpen, onClose, currentUser }) {
   const handleItemClick = (key) => {
@@ -16,6 +16,9 @@ export default function Sidebar({ activePage, onNavigate, isMobileOpen, onClose,
     { section: 'Intelligence', items: [
       { key: 'analytics', icon: <LineChart size={17} />, label: 'Analytics & Charts' },
       { key: 'export', icon: <Download size={17} />, label: 'Export Hub' },
+    ]},
+    { section: 'Collaboration', items: [
+      { key: 'collaboration', icon: <Users size={17} />, label: 'Shared Dashboards' },
     ]},
     ...(currentUser?.role === 'ROLE_ADMIN' ? [{
       section: 'Administration', items: [

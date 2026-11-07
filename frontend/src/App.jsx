@@ -8,15 +8,16 @@ import AnalyticsPage from './components/pages/AnalyticsPage';
 import ExportPage from './components/pages/ExportPage';
 import SettingsPage from './components/pages/SettingsPage';
 import AdminPage from './components/pages/AdminPage';
+import CollaborationPage from './components/pages/CollaborationPage';
 import SupportChatWidget from './components/support/SupportChatWidget';
 import SplashScreen from './components/launch/SplashScreen';
 import OnboardingModal from './components/launch/OnboardingModal';
 import AuthModal from './components/auth/AuthModal';
 import SavedProjectsModal from './components/workspace/SavedProjectsModal';
 import ErrorBoundary from './components/shared/ErrorBoundary';
-import { getWorkbookStatus, selectWorkspaceFile, deleteWorkspaceFile, getStoredUser, clearStoredAuth, getCurrentUser, getStoredToken, setStoredAuth } from './services/api';
+import { getWorkbookStatus, selectWorkspaceFile, deleteWorkspaceFile, getStoredUser, clearStoredAuth, getCurrentUser, getStoredToken, logoutUser, setStoredAuth } from './services/api';
 
-const VALID_PAGES = ['overview', 'workspace', 'assistant', 'analytics', 'export', 'admin', 'settings'];
+const VALID_PAGES = ['overview', 'workspace', 'assistant', 'analytics', 'export', 'collaboration', 'admin', 'settings'];
 
 function getInitialPage() {
   if (typeof window !== 'undefined') {
@@ -203,6 +204,7 @@ export default function App() {
             canRedo: !!res.data.canRedo,
             undoAction: res.data.undoAction || '',
             redoAction: res.data.redoAction || '',
+            initialPreview: res.data.preview || null,
           };
           setFileInfo(info);
           setActiveSheet(prev => {
@@ -244,7 +246,24 @@ export default function App() {
   const handleSelectFile = useCallback(async (fileId) => {
     try {
       const res = await selectWorkspaceFile(fileId);
-      if (res.data?.success) {
+      const data = res.data;
+      if (data?.loaded && data?.sheets?.length > 0) {
+        localStorage.removeItem('tabufinery_active_sheet');
+        setWorkspaceFiles(data.files || []);
+        const info = {
+          fileId: data.fileId,
+          fileName: data.fileName || 'Active Workbook',
+          sheetCount: data.sheets.length,
+          sheets: data.sheets,
+          canUndo: !!data.canUndo,
+          canRedo: !!data.canRedo,
+          undoAction: data.undoAction || '',
+          redoAction: data.redoAction || '',
+          initialPreview: data.preview || null,
+        };
+        setFileInfo(info);
+        setActiveSheet(info.sheets[0]);
+      } else if (data?.success) {
         onRefresh();
       }
     } catch (err) {
@@ -277,6 +296,7 @@ export default function App() {
   };
 
   const handleLogout = () => {
+    logoutUser(getStoredToken());
     clearStoredAuth();
     setCurrentUser(null);
     setFileInfo(null);
@@ -379,6 +399,7 @@ export default function App() {
                   onNavigate={navigate}
                   currentUser={currentUser}
                   onRequestAuth={() => setShowAuthModal(true)}
+                  onRefresh={onRefresh}
                 />
               )}
               {page === 'workspace' && (
@@ -432,6 +453,13 @@ export default function App() {
                   loaded={loaded}
                   onNavigate={navigate}
                   currentUser={currentUser}
+                  onRequestAuth={() => setShowAuthModal(true)}
+                />
+              )}
+              {page === 'collaboration' && (
+                <CollaborationPage
+                  currentUser={currentUser}
+                  onNavigate={navigate}
                   onRequestAuth={() => setShowAuthModal(true)}
                 />
               )}

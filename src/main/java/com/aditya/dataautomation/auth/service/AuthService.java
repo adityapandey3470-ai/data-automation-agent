@@ -21,6 +21,7 @@ import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
 import java.time.LocalDateTime;
 import java.util.Base64;
+import java.util.Map;
 import java.util.Optional;
 
 @Slf4j
@@ -36,12 +37,73 @@ public class AuthService {
     private final EmailService emailService;
     private final AuthProperties authProperties;
     private final SecureRandom secureRandom = new SecureRandom();
+    private static final String DUMMY_BCRYPT_HASH = "$2a$10$w8k2rZ0/J3XlEwY6hVqOu.8kS6U6l2Zk2h8X0lEwY6hVqOu8kS6U6";
+
+    private static class FailedLoginTracker {
+        int attempts;
+        long lockedUntil;
+        long firstAttemptTime;
+    }
+
+    private final Map<String, FailedLoginTracker> failedLogins = new java.util.concurrent.ConcurrentHashMap<>();
+    private static final int MAX_FAILED_ATTEMPTS = 5;
+    private static final long LOCKOUT_DURATION_MS = 15 * 60 * 1000L;
+    private static final int MAX_TRACKED_EMAILS = 50_000;
+
+    private void recordFailedLogin(String email) {
+        long now = System.currentTimeMillis();
+        if (failedLogins.size() >= MAX_TRACKED_EMAILS && !failedLogins.containsKey(email)) {
+            return; // memory guard against floods of random emails
+        }
+        failedLogins.compute(email, (k, v) -> {
+            if (v == null || (now - v.firstAttemptTime > LOCKOUT_DURATION_MS)) {
+                FailedLoginTracker t = new FailedLoginTracker();
+                t.attempts = 1;
+                t.firstAttemptTime = now;
+                return t;
+            }
+            v.attempts++;
+            if (v.attempts >= MAX_FAILED_ATTEMPTS) {
+                v.lockedUntil = now + LOCKOUT_DURATION_MS;
+                log.warn("Account temporarily locked for email '{}' due to {} failed attempts", email, v.attempts);
+                if (emailService.isSmtpConfigured()) {
+                    emailService.sendAccountLockoutAlert(email);
+                }
+            }
+            return v;
+        });
+    }
+
+    /** Removes expired lockout entries so the map cannot grow forever. */
+    @org.springframework.scheduling.annotation.Scheduled(fixedRate = 300_000)
+    public void cleanupFailedLogins() {
+        long now = System.currentTimeMillis();
+        failedLogins.entrySet().removeIf(e ->
+                e.getValue().lockedUntil < now && now - e.getValue().firstAttemptTime > LOCKOUT_DURATION_MS);
+    }
 
     @Transactional
     public AuthResponse signup(SignupRequest request) {
         String email = request.getEmail().trim().toLowerCase();
         if (userRepository.existsByEmailIgnoreCase(email)) {
-            throw new InvalidRequestException("An account with this email already exists");
+            // same CPU cost as the "new account" path, so response time does not reveal registered emails
+            passwordEncoder.matches(request.getPassword() != null ? request.getPassword() : "x", DUMMY_BCRYPT_HASH);
+            Optional<User> existing = userRepository.findByEmailIgnoreCase(email);
+            if (existing.isPresent() && emailService.isSmtpConfigured()) {
+                emailService.sendAccountAlreadyExistsEmail(email, existing.get().getName());
+            }
+            return AuthResponse.builder()
+                    .token(null)
+                    .tokenType("Bearer")
+                    .user(null)
+                    .emailVerificationRequired(true)
+                    .message("We sent a verification link to " + email + ". Please check your inbox.")
+                    .smtpConfigured(emailService.isSmtpConfigured())
+                    .build();
+        }
+
+        if (request.getPassword() == null || request.getPassword().length() < 8 || !request.getPassword().matches(".*[A-Za-z].*") || !request.getPassword().matches(".*[0-9!@#$%^&*()_+\\-=\\[\\]{};':\"\\\\|,.<>/?].*")) {
+            throw new InvalidRequestException("Password must be at least 8 characters long and contain both letters and numbers/special characters");
         }
 
         if (request.getConfirmPassword() != null && !request.getPassword().equals(request.getConfirmPassword())) {
@@ -79,8 +141,7 @@ public class AuthService {
         if (smtpConfigured) {
             emailService.sendVerificationEmail(user.getEmail(), user.getName(), verificationLink);
         } else {
-            log.info("SMTP host not configured (app.mail.host). Local development verification link for {}: {}",
-                    user.getEmail(), verificationLink);
+            log.info("SMTP host not configured (app.mail.host). Email verification token generated for {}", user.getEmail());
         }
 
         return AuthResponse.builder()
@@ -96,12 +157,29 @@ public class AuthService {
     @Transactional(readOnly = true)
     public AuthResponse login(LoginRequest request) {
         String email = request.getEmail().trim().toLowerCase();
-        User user = userRepository.findByEmailIgnoreCase(email)
-                .orElseThrow(() -> new InvalidRequestException("Invalid email or password"));
+        FailedLoginTracker tracker = failedLogins.get(email);
+        long now = System.currentTimeMillis();
+        if (tracker != null && tracker.lockedUntil > now) {
+            long remainingMinutes = Math.max(1, (tracker.lockedUntil - now) / 60000);
+            throw new InvalidRequestException("Account is temporarily locked due to too many failed login attempts. Please try again in " + remainingMinutes + " minute(s) or reset your password.");
+        }
 
-        if (!passwordEncoder.matches(request.getPassword(), user.getPasswordHash())) {
+        Optional<User> userOpt = userRepository.findByEmailIgnoreCase(email);
+
+        if (userOpt.isEmpty()) {
+            passwordEncoder.matches(request.getPassword(), DUMMY_BCRYPT_HASH);
+            recordFailedLogin(email);
             throw new InvalidRequestException("Invalid email or password");
         }
+
+        User user = userOpt.get();
+
+        if (!passwordEncoder.matches(request.getPassword(), user.getPasswordHash())) {
+            recordFailedLogin(email);
+            throw new InvalidRequestException("Invalid email or password");
+        }
+
+        failedLogins.remove(email);
 
         if (!user.isEnabled()) {
             throw new InvalidRequestException("Account has been disabled by administrator. Please contact support.");
@@ -128,42 +206,27 @@ public class AuthService {
         }
 
         String tokenHash = hashToken(rawToken.trim());
+        int updated = emailVerificationTokenRepository.markVerificationTokenUsedAtomic(tokenHash, LocalDateTime.now());
+        if (updated != 1) {
+            throw new InvalidRequestException("This verification link is invalid, expired, or has already been used.");
+        }
+
         EmailVerificationToken token = emailVerificationTokenRepository.findByTokenHash(tokenHash)
                 .orElseThrow(() -> new InvalidRequestException("Invalid or expired verification link. Please request a new verification email."));
-
-        if (token.isVerified()) {
-            User user = token.getUser();
-            String jwtToken = jwtService.generateToken(user.getId(), user.getEmail(), user.getName(), user.getRole());
-            return AuthResponse.builder()
-                    .token(jwtToken)
-                    .tokenType("Bearer")
-                    .user(toDto(user))
-                    .emailVerificationRequired(false)
-                    .message("Email is already verified. You are now logged in.")
-                    .build();
-        }
-
-        if (token.isExpired()) {
-            throw new InvalidRequestException("This verification link has expired. Please request a new verification link.");
-        }
 
         User user = token.getUser();
         user.setEmailVerified(true);
         user.setEnabled(true);
         userRepository.save(user);
 
-        token.setVerified(true);
-        emailVerificationTokenRepository.save(token);
-
         log.info("Email verified successfully: user_id={}, email={}", user.getId(), user.getEmail());
 
-        String jwtToken = jwtService.generateToken(user.getId(), user.getEmail(), user.getName(), user.getRole());
         return AuthResponse.builder()
-                .token(jwtToken)
+                .token(null)
                 .tokenType("Bearer")
                 .user(toDto(user))
                 .emailVerificationRequired(false)
-                .message("Your email has been successfully verified! Welcome to Tabufinery.")
+                .message("Email verified successfully. Please log in with your credentials.")
                 .build();
     }
 
@@ -262,17 +325,22 @@ public class AuthService {
 
     @Transactional
     public void resetPassword(ResetPasswordRequest request) {
+        if (request.getNewPassword() == null || request.getNewPassword().length() < 8 || !request.getNewPassword().matches(".*[A-Za-z].*") || !request.getNewPassword().matches(".*[0-9!@#$%^&*()_+\\-=\\[\\]{};':\"\\\\|,.<>/?].*")) {
+            throw new InvalidRequestException("Password must be at least 8 characters long and contain both letters and numbers/special characters");
+        }
+
         if (request.getConfirmPassword() != null && !request.getNewPassword().equals(request.getConfirmPassword())) {
             throw new InvalidRequestException("Passwords do not match");
         }
 
         String tokenHash = hashToken(request.getToken().trim());
-        PasswordResetToken resetToken = passwordResetTokenRepository.findByTokenHash(tokenHash)
-                .orElseThrow(() -> new InvalidRequestException("Invalid or expired password reset token"));
-
-        if (resetToken.isUsed() || resetToken.isExpired()) {
+        int updated = passwordResetTokenRepository.markTokenUsedAtomic(tokenHash, LocalDateTime.now());
+        if (updated != 1) {
             throw new InvalidRequestException("Invalid or expired password reset token");
         }
+
+        PasswordResetToken resetToken = passwordResetTokenRepository.findByTokenHash(tokenHash)
+                .orElseThrow(() -> new InvalidRequestException("Invalid or expired password reset token"));
 
         User user = resetToken.getUser();
         if (!user.isEnabled()) {
@@ -280,12 +348,27 @@ public class AuthService {
         }
 
         user.setPasswordHash(passwordEncoder.encode(request.getNewPassword()));
+        user.setTokensValidAfter(java.time.Instant.now().getEpochSecond()); // invalidates every earlier JWT
         userRepository.save(user);
 
-        resetToken.setUsed(true);
-        passwordResetTokenRepository.save(resetToken);
+        failedLogins.remove(user.getEmail().toLowerCase());
 
-        log.info("Password successfully reset for user id={}", user.getId());
+        log.info("Password successfully reset and all prior sessions revoked for user id={}", user.getId());
+    }
+
+    @Transactional
+    public void logout(String token) {
+        if (token != null && token.startsWith("Bearer ")) {
+            token = token.substring(7).trim();
+        }
+        if (token == null || token.isBlank()) {
+            return;
+        }
+        Long userId = jwtService.extractUserId(token);
+        if (userId != null) {
+            // logs the user out on every device: all tokens issued up to now stop working
+            userRepository.updateTokensValidAfter(userId, java.time.Instant.now().getEpochSecond());
+        }
     }
 
     @Transactional(readOnly = true)

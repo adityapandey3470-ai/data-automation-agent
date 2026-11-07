@@ -65,6 +65,10 @@ public class User {
     @Column(name = "version")
     private Long version;
 
+    /** Tokens issued at or before this epoch-second are no longer valid (set on logout / password reset). */
+    @Column(name = "tokens_valid_after")
+    private Long tokensValidAfter;
+
     @PrePersist
     protected void onCreate() {
         createdAt = LocalDateTime.now();

@@ -51,6 +51,23 @@ export const DASHBOARD_STYLE_PRESETS = [
 
 export const COLOR_PALETTES = [
   {
+    id: 'emerald_forest',
+    name: 'Emerald Forest',
+    primary: '#059669',
+    primaryHover: '#047857',
+    primarySubtle: '#ecfdf5',
+    secondary: '#10b981',
+    bg: '#f4fbf7',
+    surface: '#ffffff',
+    cardBg: '#ffffff',
+    border: '#a7f3d0',
+    textPrimary: '#064e3b',
+    textSecondary: '#047857',
+    textMuted: '#34d399',
+    chartColors: ['#059669', '#10b981', '#14b8a6', '#84cc16'],
+    accentSubtle: '#d1fae5'
+  },
+  {
     id: 'purple_blue',
     name: 'Purple + Blue',
     primary: '#4f46e5',
@@ -134,23 +151,6 @@ export const COLOR_PALETTES = [
     textMuted: '#38bdf8',
     chartColors: ['#0284c7', '#06b6d4', '#0284c7', '#3b82f6'],
     accentSubtle: '#e0f2fe'
-  },
-  {
-    id: 'emerald_forest',
-    name: 'Emerald Forest',
-    primary: '#059669',
-    primaryHover: '#047857',
-    primarySubtle: '#ecfdf5',
-    secondary: '#10b981',
-    bg: '#f4fbf7',
-    surface: '#ffffff',
-    cardBg: '#ffffff',
-    border: '#a7f3d0',
-    textPrimary: '#064e3b',
-    textSecondary: '#047857',
-    textMuted: '#34d399',
-    chartColors: ['#059669', '#10b981', '#14b8a6', '#84cc16'],
-    accentSubtle: '#d1fae5'
   },
   {
     id: 'lavender_dream',
@@ -403,12 +403,12 @@ export const PATTERN_PRESETS = [
 
 export const DEFAULT_PREFERENCES = {
   style: 'modern',
-  palette: 'purple_blue',
+  palette: 'emerald_forest',
   useCustomColors: false,
   customColors: {
-    primary: '#4f46e5',
-    secondary: '#2563eb',
-    bg: '#f8f9fa',
+    primary: '#059669',
+    secondary: '#10b981',
+    bg: '#f8fafc',
     surface: '#ffffff',
     cardBg: '#ffffff',
     border: '#e2e8f0',

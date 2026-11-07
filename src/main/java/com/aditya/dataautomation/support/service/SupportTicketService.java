@@ -14,6 +14,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.security.SecureRandom;
 import java.time.LocalDateTime;
+import java.util.UUID;
 
 @Slf4j
 @Service
@@ -72,18 +73,19 @@ public class SupportTicketService {
             throw new InvalidRequestException("Steps to reproduce are required (at least 5 characters).");
         }
 
-        String ticketCode = "BUG-" + (100000 + random.nextInt(900000));
+        String ticketCode = generateUniqueTicketCode("BUG-");
         String severity = (request.getSeverity() != null && !request.getSeverity().isBlank())
                 ? request.getSeverity().trim().toUpperCase()
                 : "MEDIUM";
 
         Long userId = (currentUser != null) ? currentUser.getId() : 0L;
         String userEmail = (currentUser != null) ? currentUser.getEmail()
-                : (request.getUserEmail() != null && !request.getUserEmail().isBlank() ? request.getUserEmail().trim() : "anonymous@tabufinery.io");
+                : (request.getUserEmail() != null && !request.getUserEmail().isBlank() ? request.getUserEmail().replaceAll("[\\r\\n]", "").trim() : "anonymous@tabufinery.io");
         String userName = (currentUser != null) ? currentUser.getName() : "Guest User";
 
         String desc = request.getDescription().trim();
-        String subject = "Bug: " + (desc.length() > 60 ? desc.substring(0, 57) + "..." : desc);
+        String oneLine = desc.replaceAll("[\\r\\n]+", " ");
+        String subject = "Bug: " + (oneLine.length() > 60 ? oneLine.substring(0, 57) + "..." : oneLine);
 
         StringBuilder msg = new StringBuilder();
         msg.append("Severity: ").append(severity).append("\n\n");
@@ -117,7 +119,18 @@ public class SupportTicketService {
     }
 
     private String generateTicketCode() {
-        int codeNum = 100000 + random.nextInt(900000);
-        return "TBF-" + codeNum;
+        return generateUniqueTicketCode("TBF-");
+    }
+
+    private String generateUniqueTicketCode(String prefix) {
+        for (int i = 0; i < 10; i++) {
+            long ts = System.currentTimeMillis() % 1000000;
+            int rand = 1000 + random.nextInt(9000);
+            String candidate = prefix + ts + "-" + rand;
+            if (!ticketRepository.existsByTicketCode(candidate)) {
+                return candidate;
+            }
+        }
+        return prefix + UUID.randomUUID().toString().replace("-", "").substring(0, 10).toUpperCase();
     }
 }

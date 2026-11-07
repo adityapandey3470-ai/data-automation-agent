@@ -94,6 +94,10 @@ export const signupUser = (name, email, password, confirmPassword) =>
 export const loginUser = (email, password) =>
   api.post('/auth/login', { email, password });
 
+// token ko explicitly bhejte hain, kyunki clearStoredAuth() isse pehle storage saaf kar deta hai
+export const logoutUser = (token) =>
+  api.post('/auth/logout', null, { headers: token ? { Authorization: `Bearer ${token}` } : {} }).catch(() => {});
+
 export const forgotPassword = (email) =>
   api.post('/auth/forgot-password', { email });
 
@@ -289,3 +293,25 @@ export const cancelJob = (jobId) =>
 
 export const listRecentJobs = () =>
   api.get('/jobs');
+
+export const shareDashboard = (payload) =>
+  api.post('/dashboard/collaboration/share', payload);
+
+export const getSharedWithMeDashboards = () =>
+  api.get('/dashboard/collaboration/shared-with-me');
+
+export const getSharedByMeDashboards = () =>
+  api.get('/dashboard/collaboration/shared-by-me');
+
+export const getDashboardCollaborators = (dashboardId) =>
+  api.get(`/dashboard/collaboration/${dashboardId}/collaborators`);
+
+export const updateCollaboratorPermissions = (shareId, payload) =>
+  api.put(`/dashboard/collaboration/${shareId}/permissions`, payload);
+
+export const revokeCollaboratorShare = (shareId) =>
+  api.delete(`/dashboard/collaboration/${shareId}`);
+
+export const validateDeletePermission = (dashboardId) =>
+  api.get(`/dashboard/collaboration/${dashboardId}/validate-delete`);
+

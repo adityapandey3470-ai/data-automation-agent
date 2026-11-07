@@ -32,6 +32,7 @@ export default function DataWorkspace({
   const [uploadError, setUploadError] = useState(null);
   const [preview, setPreview] = useState(null);
   const [loadingPreview, setLoadingPreview] = useState(false);
+  const [switchingFileId, setSwitchingFileId] = useState(null);
   const [viewMode, setViewMode] = useState(() => {
     try {
       return localStorage.getItem('tabufinery_view_mode') || 'preview';
@@ -114,13 +115,26 @@ export default function DataWorkspace({
   }, [activeSheet?.sheetName]);
 
   useEffect(() => {
-    if (tableContainerRef.current) {
-      tableContainerRef.current.scrollTop = 0;
+    if (tableContainerRef.current && tableContainerRef.current.scrollTop !== 0) {
+      requestAnimationFrame(() => {
+        if (tableContainerRef.current && tableContainerRef.current.scrollTop !== 0) {
+          tableContainerRef.current.scrollTop = 0;
+        }
+      });
     }
   }, [viewMode, activeSheet?.sheetName]);
 
   useEffect(() => {
     sheetDataCacheRef.current = {};
+    if (fileInfo?.initialPreview && (!activeSheet?.sheetName || fileInfo.initialPreview.sheetName === activeSheet?.sheetName)) {
+      sheetDataCacheRef.current[fileInfo.initialPreview.sheetName] = {
+        previewData: fileInfo.initialPreview
+      };
+      setPreview(fileInfo.initialPreview);
+      setLoadingPreview(false);
+    } else {
+      setPreview(null);
+    }
   }, [refreshKey, fileInfo?.fileId]);
 
   const [historyLoading, setHistoryLoading] = useState(false);
@@ -143,6 +157,10 @@ export default function DataWorkspace({
   const [oldVal, setOldVal] = useState('');
   const [newVal, setNewVal] = useState('');
   const [targetType, setTargetType] = useState('STRING');
+  const [dupCaseInsensitive, setDupCaseInsensitive] = useState(false);
+  const [dupTrim, setDupTrim] = useState(true);
+  const [replaceMode, setReplaceMode] = useState('ENTIRE'); // ENTIRE | CONTAINS | REGEX
+  const [dateOrder, setDateOrder] = useState('AUTO');       // AUTO | DMY | MDY
 
   const [pipeline, setPipeline] = useState([]);
 
@@ -209,6 +227,16 @@ export default function DataWorkspace({
   useEffect(() => {
     loadData();
   }, [loadData, refreshKey]);
+
+  const handleSwitchFile = async (targetFileId) => {
+    if (switchingFileId || !onSelectFile) return;
+    setSwitchingFileId(targetFileId);
+    try {
+      await onSelectFile(targetFileId);
+    } finally {
+      setSwitchingFileId(null);
+    }
+  };
 
   const handleHeaderSort = (header) => {
     if (sortColumn === header) {
@@ -301,7 +329,7 @@ export default function DataWorkspace({
     const base = { sheetName };
     switch (cleanOp) {
       case 'duplicates':
-        return { ...base, operation: 'REMOVE_DUPLICATES', duplicateStrategy: dupStrategy };
+        return { ...base, operation: 'REMOVE_DUPLICATES', duplicateStrategy: dupStrategy, caseInsensitive: dupCaseInsensitive, trimWhitespace: dupTrim };
       case 'missing':
         return { ...base, operation: 'HANDLE_MISSING_VALUES', columnName: cleanCol, missingValueStrategy: missingStrategy, value: missingStrategy === 'FILL_CONSTANT' ? fillValue : undefined };
       case 'trim':
@@ -311,13 +339,14 @@ export default function DataWorkspace({
       case 'uppercase':
         return { ...base, operation: 'UPPERCASE', columnName: cleanCol };
       case 'replace':
-        return { ...base, operation: 'REPLACE_VALUE', columnName: cleanCol, oldValue: oldVal, newValue: newVal };
+        return { ...base, operation: 'REPLACE_VALUE', columnName: cleanCol, oldValue: oldVal, newValue: newVal,
+                 regex: replaceMode === 'REGEX', matchEntireCell: replaceMode === 'ENTIRE' };
       case 'rename':
         return { ...base, operation: 'RENAME_COLUMN', columnName: cleanCol, newValue: newVal };
       case 'remove':
         return { ...base, operation: 'REMOVE_COLUMN', columnName: cleanCol };
       case 'convert':
-        return { ...base, operation: 'CONVERT_TYPE', columnName: cleanCol, targetType };
+        return { ...base, operation: 'CONVERT_TYPE', columnName: cleanCol, targetType, dateOrder: dateOrder === 'AUTO' ? null : dateOrder };
       default:
         return null;
     }
@@ -333,17 +362,18 @@ export default function DataWorkspace({
       const res = await previewCleaning(req);
       setPreviewData(res.data);
       setPendingApplyAction(() => async () => {
+        const applyReq = { ...req, baseVersion: fileInfo?.version };
         let applyRes;
         switch (cleanOp) {
-          case 'duplicates': applyRes = await removeDuplicates(req); break;
-          case 'missing': applyRes = await handleMissing(req); break;
-          case 'trim': applyRes = await cleanStrings(req); break;
-          case 'lowercase': applyRes = await cleanStrings(req); break;
-          case 'uppercase': applyRes = await cleanStrings(req); break;
-          case 'replace': applyRes = await replaceValues(req); break;
-          case 'rename': applyRes = await renameColumn(req); break;
-          case 'remove': applyRes = await removeColumn(req); break;
-          case 'convert': applyRes = await convertType(req); break;
+          case 'duplicates': applyRes = await removeDuplicates(applyReq); break;
+          case 'missing': applyRes = await handleMissing(applyReq); break;
+          case 'trim': applyRes = await cleanStrings(applyReq); break;
+          case 'lowercase': applyRes = await cleanStrings(applyReq); break;
+          case 'uppercase': applyRes = await cleanStrings(applyReq); break;
+          case 'replace': applyRes = await replaceValues(applyReq); break;
+          case 'rename': applyRes = await renameColumn(applyReq); break;
+          case 'remove': applyRes = await removeColumn(applyReq); break;
+          case 'convert': applyRes = await convertType(applyReq); break;
         }
         return applyRes?.data;
       });
@@ -364,7 +394,8 @@ export default function DataWorkspace({
       const res = await previewPipeline(pipeline);
       setPreviewData(res.data);
       setPendingApplyAction(() => async () => {
-        const applyRes = await transformPipeline(pipeline);
+        const versioned = pipeline.map((p, i) => (i === 0 ? { ...p, baseVersion: fileInfo?.version } : p));
+        const applyRes = await transformPipeline(versioned);
         const last = applyRes.data[applyRes.data.length - 1];
         setPipeline([]);
         return {
@@ -395,6 +426,9 @@ export default function DataWorkspace({
       onRefresh();
     } catch (err) {
       setCleanError(getErrorMessage(err, 'Failed to apply transformation. Please verify your data.'));
+      if (err?.response?.status === 409) {
+        onRefresh();
+      }
     } finally {
       setPreviewApplying(false);
     }
@@ -410,14 +444,14 @@ export default function DataWorkspace({
 
   return (
     <div className="workspace-page">
-      <div className="page-header flex-between mb-20">
-        <div>
+      <div className="page-header flex-between mb-20" style={{ flexWrap: 'wrap', gap: 12 }}>
+        <div style={{ minWidth: 0, flex: 1 }}>
           <h1>Data Workspace</h1>
           <p>Direct workbook ingestion, live tabular inspection, change preview, and undo/redo history.</p>
         </div>
 
         {loaded && (
-          <div className="flex-gap undo-redo-toolbar">
+          <div className="flex-gap undo-redo-toolbar" style={{ flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
             <button
               className="btn btn-sm btn-outline flex-gap"
               onClick={handleUndo}
@@ -427,7 +461,7 @@ export default function DataWorkspace({
               <Undo size={14} />
               <span>Undo</span>
               {fileInfo?.canUndo && fileInfo?.undoAction && (
-                <span className="badge badge-neutral" style={{ fontSize: 10, padding: '1px 5px' }}>
+                <span className="badge badge-neutral" style={{ fontSize: 10, padding: '1px 5px', maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {fileInfo.undoAction}
                 </span>
               )}
@@ -442,7 +476,7 @@ export default function DataWorkspace({
               <Redo size={14} />
               <span>Redo</span>
               {fileInfo?.canRedo && fileInfo?.redoAction && (
-                <span className="badge badge-neutral" style={{ fontSize: 10, padding: '1px 5px' }}>
+                <span className="badge badge-neutral" style={{ fontSize: 10, padding: '1px 5px', maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {fileInfo.redoAction}
                 </span>
               )}
@@ -474,14 +508,14 @@ export default function DataWorkspace({
 
       {currentUser && workspaceFiles && workspaceFiles.length > 0 && (
         <div className="card mb-20">
-          <div className="card-header flex-between">
-            <div className="flex-gap">
-              <FileSpreadsheet size={16} className="text-emerald" />
+          <div className="card-header flex-between" style={{ flexWrap: 'wrap', gap: '8px 16px', alignItems: 'center' }}>
+            <div className="flex-gap" style={{ minWidth: 0, flexShrink: 0 }}>
+              <FileSpreadsheet size={16} className="text-emerald" style={{ flexShrink: 0 }} />
               <span className="card-title">User Workspace Workbooks ({workspaceFiles.length}/20)</span>
             </div>
-            <span className="text-xs text-secondary">Switch between uploaded workbooks without losing session data</span>
+            <span className="text-xs text-secondary" style={{ flexShrink: 1, minWidth: 0 }}>Switch between uploaded workbooks without losing session data</span>
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 12, marginTop: 12 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(280px, 100%), 1fr))', gap: 12, marginTop: 12 }}>
             {workspaceFiles.map(file => (
               <div
                 key={file.fileId}
@@ -490,29 +524,50 @@ export default function DataWorkspace({
                   borderRadius: 8,
                   padding: 14,
                   background: file.active ? 'rgba(16, 185, 129, 0.05)' : 'var(--bg-card)',
-                  transition: 'all 0.2s ease'
+                  transition: 'all 0.2s ease',
+                  minWidth: 0,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  justifyContent: 'space-between'
                 }}
               >
-                <div className="flex-between mb-8">
-                  <div className="flex-gap" style={{ overflow: 'hidden' }}>
-                    <FileSpreadsheet size={16} className={file.active ? 'text-emerald' : 'text-secondary'} />
-                    <span style={{ fontWeight: 600, fontSize: 13, textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }} title={file.fileName}>
-                      {file.fileName}
-                    </span>
+                <div>
+                  <div className="flex-between mb-8" style={{ gap: 8, alignItems: 'center' }}>
+                    <div className="flex-gap" style={{ overflow: 'hidden', minWidth: 0, flex: 1 }}>
+                      <FileSpreadsheet size={16} className={file.active ? 'text-emerald' : 'text-secondary'} style={{ flexShrink: 0 }} />
+                      <span style={{ fontWeight: 600, fontSize: 13, textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap', minWidth: 0 }} title={file.fileName}>
+                        {file.fileName}
+                      </span>
+                    </div>
+                    {file.active && <span className="badge badge-success" style={{ fontSize: 10, flexShrink: 0 }}>Active</span>}
                   </div>
-                  {file.active && <span className="badge badge-success" style={{ fontSize: 10 }}>Active</span>}
+                  <div
+                    style={{
+                      fontSize: 11,
+                      color: 'var(--text-secondary)',
+                      marginBottom: 12,
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap'
+                    }}
+                    title={`${file.sheetCount} ${file.sheetCount === 1 ? 'sheet' : 'sheets'} (${file.sheetNames?.join(', ') || ''}) · ${file.totalRows?.toLocaleString()} rows`}
+                  >
+                    {file.sheetCount} {file.sheetCount === 1 ? 'sheet' : 'sheets'} ({file.sheetNames?.join(', ') || ''}) · {file.totalRows?.toLocaleString()} rows
+                  </div>
                 </div>
-                <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginBottom: 12 }}>
-                  {file.sheetCount} {file.sheetCount === 1 ? 'sheet' : 'sheets'} ({file.sheetNames?.join(', ') || ''}) · {file.totalRows?.toLocaleString()} rows
-                </div>
-                <div className="flex-between">
+                <div className="flex-between" style={{ gap: 8, flexWrap: 'wrap', marginTop: 4 }}>
                   {!file.active ? (
                     <button
                       className="btn btn-xs btn-primary"
-                      onClick={() => onSelectFile && onSelectFile(file.fileId)}
-                      style={{ fontSize: 11 }}
+                      onClick={() => handleSwitchFile(file.fileId)}
+                      disabled={!!switchingFileId}
+                      style={{ fontSize: 11, minWidth: 92, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 4 }}
                     >
-                      Switch to this
+                      {switchingFileId === file.fileId ? (
+                        <><RefreshCw size={11} className="spin" /> Switching...</>
+                      ) : (
+                        'Switch to this'
+                      )}
                     </button>
                   ) : (
                     <span style={{ fontSize: 11, color: '#10b981', fontWeight: 600 }}>Active Dataset</span>
@@ -537,15 +592,30 @@ export default function DataWorkspace({
       )}
 
       <div className="card mb-20">
-        <div className="card-header flex-between">
-          <div className="flex-gap">
-            <Upload size={16} className="text-emerald" />
+        <div className="card-header flex-between" style={{ flexWrap: 'wrap', gap: '8px 12px' }}>
+          <div className="flex-gap" style={{ minWidth: 0, flexShrink: 0 }}>
+            <Upload size={16} className="text-emerald" style={{ flexShrink: 0 }} />
             <span className="card-title">Dataset Ingestion</span>
           </div>
-          <div className="flex-gap">
-            <span className="badge badge-neutral">Max 10MB</span>
-            <span className="badge badge-info">.xlsx OpenXML</span>
-            {loaded && <span className="badge badge-success">Active: {fileInfo.fileName}</span>}
+          <div className="flex-gap" style={{ flexWrap: 'wrap', gap: 6, minWidth: 0, alignItems: 'center' }}>
+            <span className="badge badge-neutral" style={{ flexShrink: 0 }}>Max 10MB</span>
+            <span className="badge badge-info" style={{ flexShrink: 0 }}>.xlsx OpenXML</span>
+            {loaded && (
+              <span
+                className="badge badge-success"
+                style={{
+                  maxWidth: 240,
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                  display: 'inline-block',
+                  flexShrink: 1
+                }}
+                title={`Active: ${fileInfo.fileName}`}
+              >
+                Active: {fileInfo.fileName}
+              </span>
+            )}
           </div>
         </div>
 
@@ -597,7 +667,7 @@ export default function DataWorkspace({
 
       {loaded && fileInfo.sheets?.length > 1 && (
         <div className="card mb-20">
-          <div className="flex-between">
+          <div className="flex-between" style={{ flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
             <span className="text-xs text-secondary font-semibold uppercase tracking-wider">Workbook Sheets</span>
             <span className="text-xs text-secondary">{fileInfo.sheets.length} sheets in memory</span>
           </div>
@@ -639,7 +709,7 @@ export default function DataWorkspace({
               )}
             </div>
 
-            <div className="flex-gap" style={{ flexWrap: 'wrap' }}>
+            <div className="flex-gap" style={{ flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
               <div
                 style={{
                   display: 'flex',
@@ -649,13 +719,15 @@ export default function DataWorkspace({
                   border: '1px solid var(--border)',
                   borderRadius: 6,
                   padding: '4px 10px',
+                  minWidth: 140,
+                  maxWidth: '100%',
                 }}
               >
                 <Search size={13} className="text-secondary" style={{ flexShrink: 0 }} />
                 <input
                   id="workspace-row-filter"
                   name="rowFilter"
-                  type="search"
+                  type="text"
                   placeholder="Quick filter rows..."
                   aria-label="Quick filter rows"
                   autoComplete="off"
@@ -672,6 +744,7 @@ export default function DataWorkspace({
                 />
                 {searchQuery && (
                   <button
+                    type="button"
                     onClick={() => setSearchQuery('')}
                     style={{
                       background: 'none',
@@ -901,13 +974,25 @@ export default function DataWorkspace({
             )}
 
             {cleanOp === 'duplicates' && (
-              <div className="form-group">
-                <label className="form-label">Strategy</label>
-                <select className="form-select" value={dupStrategy} onChange={e => setDupStrategy(e.target.value)}>
-                  <option value="KEEP_FIRST">Keep First Occurrence</option>
-                  <option value="KEEP_LAST">Keep Last Occurrence</option>
-                </select>
-              </div>
+              <>
+                <div className="form-group">
+                  <label className="form-label">Strategy</label>
+                  <select className="form-select" value={dupStrategy} onChange={e => setDupStrategy(e.target.value)}>
+                    <option value="KEEP_FIRST">Keep First Occurrence</option>
+                    <option value="KEEP_LAST">Keep Last Occurrence</option>
+                  </select>
+                </div>
+                <div className="form-group">
+                  <label className="form-label" style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                    <input type="checkbox" checked={dupTrim} onChange={e => setDupTrim(e.target.checked)} />
+                    Ignore leading/trailing spaces
+                  </label>
+                  <label className="form-label" style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                    <input type="checkbox" checked={dupCaseInsensitive} onChange={e => setDupCaseInsensitive(e.target.checked)} />
+                    Ignore upper/lower case
+                  </label>
+                </div>
+              </>
             )}
 
             {cleanOp === 'missing' && (
@@ -934,12 +1019,20 @@ export default function DataWorkspace({
             {cleanOp === 'replace' && (
               <>
                 <div className="form-group">
+                  <label className="form-label">Match mode</label>
+                  <select className="form-select" value={replaceMode} onChange={e => setReplaceMode(e.target.value)}>
+                    <option value="ENTIRE">Whole cell equals</option>
+                    <option value="CONTAINS">Cell contains (e.g. remove ₹)</option>
+                    <option value="REGEX">Regular expression</option>
+                  </select>
+                </div>
+                <div className="form-group">
                   <label className="form-label">Old Value</label>
                   <input className="form-input" value={oldVal} onChange={e => setOldVal(e.target.value)} placeholder="Search for..." />
                 </div>
                 <div className="form-group">
                   <label className="form-label">New Value</label>
-                  <input className="form-input" value={newVal} onChange={e => setNewVal(e.target.value)} placeholder="Replace with..." />
+                  <input className="form-input" value={newVal} onChange={e => setNewVal(e.target.value)} placeholder="Replace with... (empty = remove)" />
                 </div>
               </>
             )}
@@ -952,14 +1045,26 @@ export default function DataWorkspace({
             )}
 
             {cleanOp === 'convert' && (
-              <div className="form-group">
-                <label className="form-label">Target Data Type</label>
-                <select className="form-select" value={targetType} onChange={e => setTargetType(e.target.value)}>
-                  {['STRING', 'INTEGER', 'DECIMAL', 'BOOLEAN', 'DATE', 'DATETIME'].map(t => (
-                    <option key={t} value={t}>{t}</option>
-                  ))}
-                </select>
-              </div>
+              <>
+                <div className="form-group">
+                  <label className="form-label">Target Data Type</label>
+                  <select className="form-select" value={targetType} onChange={e => setTargetType(e.target.value)}>
+                    {['STRING', 'INTEGER', 'DECIMAL', 'BOOLEAN', 'DATE', 'DATETIME'].map(t => (
+                      <option key={t} value={t}>{t}</option>
+                    ))}
+                  </select>
+                </div>
+                {(targetType === 'DATE' || targetType === 'DATETIME') && (
+                  <div className="form-group">
+                    <label className="form-label">Date order in your data</label>
+                    <select className="form-select" value={dateOrder} onChange={e => setDateOrder(e.target.value)}>
+                      <option value="AUTO">Auto-detect</option>
+                      <option value="DMY">Day first (31/12/2026)</option>
+                      <option value="MDY">Month first (12/31/2026)</option>
+                    </select>
+                  </div>
+                )}
+              </>
             )}
 
             <div className="form-action-group" style={{ marginTop: 'auto' }}>

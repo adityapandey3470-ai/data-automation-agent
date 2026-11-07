@@ -3,6 +3,7 @@ package com.aditya.dataautomation.analysis.service.impl;
 import com.aditya.dataautomation.analysis.exception.AnalysisException;
 import com.aditya.dataautomation.analysis.model.*;
 import com.aditya.dataautomation.analysis.service.DataAnalysisService;
+import com.aditya.dataautomation.common.util.NumericParser;
 import com.aditya.dataautomation.common.util.RowFingerprintUtil;
 import com.aditya.dataautomation.excel.model.ExcelSheetData;
 import lombok.extern.slf4j.Slf4j;
@@ -12,6 +13,7 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
 import java.util.*;
@@ -155,7 +157,7 @@ public class DataAnalysisServiceImpl implements DataAnalysisService {
                 return (long) count;
             }
             if (numCount == 0) {
-                return BigDecimal.ZERO;
+                return null;
             }
             return switch (fn) {
                 case SUM -> sum;
@@ -387,39 +389,7 @@ public class DataAnalysisServiceImpl implements DataAnalysisService {
     }
 
     private BigDecimal tryParseBigDecimal(Object val) {
-        if (val == null) return null;
-        if (val instanceof BigDecimal bd) return bd;
-        if (val instanceof Long l) return BigDecimal.valueOf(l);
-        if (val instanceof Integer i) return BigDecimal.valueOf(i);
-        if (val instanceof Double d) {
-            if (Double.isNaN(d) || Double.isInfinite(d)) return null;
-            return BigDecimal.valueOf(d);
-        }
-        if (val instanceof Float f) {
-            if (Float.isNaN(f) || Float.isInfinite(f)) return null;
-            return BigDecimal.valueOf(f.doubleValue());
-        }
-        if (val instanceof Number n) {
-            try {
-                return new BigDecimal(n.toString());
-            } catch (Exception e) {
-                return null;
-            }
-        }
-        if (val instanceof String s) {
-            String trimmed = s.trim();
-            if (trimmed.isEmpty()) return null;
-            String cleaned = trimmed.replace(",", "");
-            if (cleaned.startsWith("$") || cleaned.startsWith("€") || cleaned.startsWith("£") || cleaned.startsWith("₹")) {
-                cleaned = cleaned.substring(1).trim();
-            }
-            try {
-                return new BigDecimal(cleaned);
-            } catch (NumberFormatException e) {
-                return null;
-            }
-        }
-        return null;
+        return NumericParser.parseBigDecimal(val);
     }
 
     private boolean matchesCondition(Map<String, Object> row, FilterCondition condition,
@@ -429,9 +399,41 @@ public class DataAnalysisServiceImpl implements DataAnalysisService {
         FilterOperator op = condition.getOperator();
         Object filterValue = condition.getValue();
 
+        if (op == FilterOperator.IS_NULL) return cellValue == null;
+        if (op == FilterOperator.IS_NOT_NULL) return cellValue != null;
+
+        if (op == FilterOperator.GREATER_THAN || op == FilterOperator.GREATER_THAN_OR_EQUAL
+                || op == FilterOperator.LESS_THAN || op == FilterOperator.LESS_THAN_OR_EQUAL) {
+            if (cellValue == null || (cellValue instanceof String s && s.trim().isEmpty())) {
+                return false;
+            }
+            if (filterValue == null || (filterValue instanceof String fs && fs.trim().isEmpty())) {
+                return false;
+            }
+            Boolean dateMatch = matchDateCondition(cellValue, filterValue, op);
+            if (dateMatch != null) {
+                return dateMatch;
+            }
+            BigDecimal cellNum = NumericParser.parseBigDecimal(cellValue);
+            BigDecimal filterNum = NumericParser.parseBigDecimal(filterValue);
+            if (cellNum != null && filterNum != null) {
+                int cmp = cellNum.compareTo(filterNum);
+                return switch (op) {
+                    case GREATER_THAN -> cmp > 0;
+                    case GREATER_THAN_OR_EQUAL -> cmp >= 0;
+                    case LESS_THAN -> cmp < 0;
+                    case LESS_THAN_OR_EQUAL -> cmp <= 0;
+                    default -> false;
+                };
+            }
+        }
+
+        Boolean dateMatch = matchDateCondition(cellValue, filterValue, op);
+        if (dateMatch != null) {
+            return dateMatch;
+        }
+
         return switch (op) {
-            case IS_NULL -> cellValue == null;
-            case IS_NOT_NULL -> cellValue != null;
             case EQUALS -> objectEquals(cellValue, filterValue);
             case NOT_EQUALS -> !objectEquals(cellValue, filterValue);
             case GREATER_THAN -> compareValues(cellValue, filterValue) > 0;
@@ -439,20 +441,102 @@ public class DataAnalysisServiceImpl implements DataAnalysisService {
             case LESS_THAN -> compareValues(cellValue, filterValue) < 0;
             case LESS_THAN_OR_EQUAL -> compareValues(cellValue, filterValue) <= 0;
             case CONTAINS -> stringOp(cellValue, filterValue,
-                    (s, v) -> s.toLowerCase().contains(v.toLowerCase()));
+                    (s, v) -> s.toLowerCase(Locale.ROOT).contains(v.toLowerCase(Locale.ROOT)));
             case STARTS_WITH -> stringOp(cellValue, filterValue,
-                    (s, v) -> s.toLowerCase().startsWith(v.toLowerCase()));
+                    (s, v) -> s.toLowerCase(Locale.ROOT).startsWith(v.toLowerCase(Locale.ROOT)));
             case ENDS_WITH -> stringOp(cellValue, filterValue,
-                    (s, v) -> s.toLowerCase().endsWith(v.toLowerCase()));
+                    (s, v) -> s.toLowerCase(Locale.ROOT).endsWith(v.toLowerCase(Locale.ROOT)));
+            default -> false;
         };
+    }
+
+    private Boolean matchDateCondition(Object cellValue, Object filterValue, FilterOperator op) {
+        if (cellValue == null || filterValue == null) return null;
+        LocalDateTime cellDt = tryParseDateTime(cellValue);
+        if (cellDt == null) {
+            LocalDate cDate = tryParseDate(cellValue);
+            if (cDate != null) cellDt = cDate.atStartOfDay();
+        }
+        if (cellDt == null) return null;
+
+        LocalDate fDate = tryParseDate(filterValue);
+        LocalDateTime fDt = tryParseDateTime(filterValue);
+
+        if (fDt == null && fDate != null) {
+            LocalDateTime start = fDate.atStartOfDay();
+            LocalDateTime end = fDate.atTime(LocalTime.MAX);
+            return switch (op) {
+                case EQUALS -> !cellDt.isBefore(start) && !cellDt.isAfter(end);
+                case NOT_EQUALS -> cellDt.isBefore(start) || cellDt.isAfter(end);
+                case GREATER_THAN -> cellDt.isAfter(end);
+                case GREATER_THAN_OR_EQUAL -> !cellDt.isBefore(start);
+                case LESS_THAN -> cellDt.isBefore(start);
+                case LESS_THAN_OR_EQUAL -> !cellDt.isAfter(end);
+                default -> null;
+            };
+        } else if (fDt != null) {
+            int cmp = cellDt.compareTo(fDt);
+            return switch (op) {
+                case EQUALS -> cmp == 0;
+                case NOT_EQUALS -> cmp != 0;
+                case GREATER_THAN -> cmp > 0;
+                case GREATER_THAN_OR_EQUAL -> cmp >= 0;
+                case LESS_THAN -> cmp < 0;
+                case LESS_THAN_OR_EQUAL -> cmp <= 0;
+                default -> null;
+            };
+        }
+        return null;
+    }
+
+    private LocalDate tryParseDate(Object val) {
+        if (val == null) return null;
+        if (val instanceof LocalDate ld) return ld;
+        String s = val.toString().trim();
+        if (s.isEmpty()) return null;
+        try {
+            return LocalDate.parse(s);
+        } catch (DateTimeParseException ignored) {}
+        try {
+            return LocalDate.parse(s, DateTimeFormatter.ofPattern("dd/MM/yyyy"));
+        } catch (DateTimeParseException ignored) {}
+        try {
+            return LocalDate.parse(s, DateTimeFormatter.ofPattern("dd-MM-yyyy"));
+        } catch (DateTimeParseException ignored) {}
+        try {
+            return LocalDate.parse(s, DateTimeFormatter.ofPattern("yyyy/MM/dd"));
+        } catch (DateTimeParseException ignored) {}
+        return null;
+    }
+
+    private LocalDateTime tryParseDateTime(Object val) {
+        if (val == null) return null;
+        if (val instanceof LocalDateTime ldt) return ldt;
+        String s = val.toString().trim();
+        if (s.isEmpty()) return null;
+        try {
+            return LocalDateTime.parse(s, DATE_TIME_FMT);
+        } catch (DateTimeParseException ignored) {}
+        try {
+            return LocalDateTime.parse(s);
+        } catch (DateTimeParseException ignored) {}
+        try {
+            return LocalDateTime.parse(s, DateTimeFormatter.ofPattern("yyyy/MM/dd HH:mm:ss"));
+        } catch (DateTimeParseException ignored) {}
+        try {
+            return LocalDateTime.parse(s, DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm:ss"));
+        } catch (DateTimeParseException ignored) {}
+        return null;
     }
 
     private boolean objectEquals(Object a, Object b) {
         if (a == null && b == null) return true;
         if (a == null || b == null) return false;
 
-        if (a instanceof Number && b instanceof Number) {
-            return toBigDecimal(a).compareTo(toBigDecimal(b)) == 0;
+        BigDecimal numA = NumericParser.parseBigDecimal(a);
+        BigDecimal numB = NumericParser.parseBigDecimal(b);
+        if (numA != null && numB != null) {
+            return numA.compareTo(numB) == 0;
         }
         return a.toString().equalsIgnoreCase(b.toString());
     }
@@ -462,16 +546,10 @@ public class DataAnalysisServiceImpl implements DataAnalysisService {
         if (cellValue == null) return -1;
         if (filterValue == null) return 1;
 
-        if (cellValue instanceof Number && filterValue instanceof Number) {
-            return toBigDecimal(cellValue).compareTo(toBigDecimal(filterValue));
-        }
-
-        if (cellValue instanceof Number && filterValue instanceof String fs) {
-            try {
-                return toBigDecimal(cellValue).compareTo(new BigDecimal(fs));
-            } catch (NumberFormatException e) {
-
-            }
+        BigDecimal cellNum = NumericParser.parseBigDecimal(cellValue);
+        BigDecimal filterNum = NumericParser.parseBigDecimal(filterValue);
+        if (cellNum != null && filterNum != null) {
+            return cellNum.compareTo(filterNum);
         }
 
         if (isDateString(cellValue.toString()) && isDateString(filterValue.toString())) {
@@ -488,21 +566,7 @@ public class DataAnalysisServiceImpl implements DataAnalysisService {
     }
 
     private BigDecimal toBigDecimal(Object value) {
-        if (value == null) return null;
-        if (value instanceof BigDecimal bd) return bd;
-        if (value instanceof Long l) return BigDecimal.valueOf(l);
-        if (value instanceof Integer i) return BigDecimal.valueOf(i);
-        if (value instanceof Double d) return BigDecimal.valueOf(d);
-        if (value instanceof Float f) return BigDecimal.valueOf(f.doubleValue());
-        if (value instanceof Short s) return BigDecimal.valueOf(s);
-        if (value instanceof Byte b) return BigDecimal.valueOf(b);
-        String s = value.toString().trim();
-        if (s.isEmpty()) return null;
-        try {
-            return new BigDecimal(s.replace(",", ""));
-        } catch (Exception e) {
-            return null;
-        }
+        return NumericParser.parseBigDecimal(value);
     }
 
     private boolean isDateString(String s) {
@@ -542,15 +606,7 @@ public class DataAnalysisServiceImpl implements DataAnalysisService {
     }
 
     private int compareForSort(Object a, Object b) {
-        if (a == null && b == null) return 0;
-        if (a == null) return 1;
-        if (b == null) return -1;
-
-        if (a instanceof Number && b instanceof Number) {
-            return toBigDecimal(a).compareTo(toBigDecimal(b));
-        }
-
-        return a.toString().compareToIgnoreCase(b.toString());
+        return NumericParser.compare(a, b);
     }
 
     private String detectColumnType(List<Object> nonNullValues) {
@@ -562,7 +618,7 @@ public class DataAnalysisServiceImpl implements DataAnalysisService {
         int total = nonNullValues.size();
 
         for (Object val : nonNullValues) {
-            if (tryParseBigDecimal(val) != null) numericCount++;
+            if (NumericParser.isNumeric(val)) numericCount++;
             if (val instanceof Boolean || (val instanceof String s && ("true".equalsIgnoreCase(s.trim()) || "false".equalsIgnoreCase(s.trim())))) {
                 booleanCount++;
             }

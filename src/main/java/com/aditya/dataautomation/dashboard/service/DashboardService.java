@@ -1,6 +1,7 @@
 package com.aditya.dataautomation.dashboard.service;
 
 import com.aditya.dataautomation.dashboard.model.Dashboard;
+import com.aditya.dataautomation.dashboard.model.DashboardPermission;
 import com.aditya.dataautomation.dashboard.model.DashboardWidget;
 import com.aditya.dataautomation.excel.model.ExcelWorkbookData;
 
@@ -29,6 +30,8 @@ public interface DashboardService {
     Dashboard getDashboard(String dashboardId, ExcelWorkbookData workbook);
 
     Dashboard findDashboard(Long userId, String dashboardId);
+
+    Dashboard getDashboardWithPermission(Long userId, String dashboardId, DashboardPermission permission);
 
     List<Dashboard> listDashboards(Long userId);
 

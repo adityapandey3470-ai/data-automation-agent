@@ -43,4 +43,6 @@ public class DashboardWidget {
     private List<Map<String, Object>> tableData;
 
     private ChartConfig chartConfig;
+
+    private String warning;
 }

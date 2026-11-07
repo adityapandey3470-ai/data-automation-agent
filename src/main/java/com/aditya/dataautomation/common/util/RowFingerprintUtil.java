@@ -9,6 +9,10 @@ public final class RowFingerprintUtil {
     private RowFingerprintUtil() {}
 
     public static String computeFingerprint(Map<String, Object> row, List<String> columns) {
+        return computeFingerprint(row, columns, false, false);
+    }
+
+    public static String computeFingerprint(Map<String, Object> row, List<String> columns, boolean caseInsensitive, boolean trimWhitespace) {
         if (row == null) {
             return "§NULL_ROW§";
         }
@@ -22,7 +26,14 @@ public final class RowFingerprintUtil {
             if (val == null) {
                 sb.append("§N;");
             } else if (val instanceof String s) {
-                sb.append("§S:").append(s.length()).append(":").append(s).append(";");
+                String str = s;
+                if (trimWhitespace) {
+                    str = str.trim();
+                }
+                if (caseInsensitive) {
+                    str = str.toLowerCase(java.util.Locale.ROOT);
+                }
+                sb.append("§S:").append(str.length()).append(":").append(str).append(";");
             } else if (val instanceof Number n) {
                 try {
                     BigDecimal bd = (val instanceof BigDecimal b) ? b : new BigDecimal(n.toString());
@@ -36,6 +47,12 @@ public final class RowFingerprintUtil {
                 sb.append("§B:").append(b).append(";");
             } else {
                 String str = val.toString();
+                if (trimWhitespace) {
+                    str = str.trim();
+                }
+                if (caseInsensitive) {
+                    str = str.toLowerCase(java.util.Locale.ROOT);
+                }
                 sb.append("§O:").append(str.length()).append(":").append(str).append(";");
             }
         }

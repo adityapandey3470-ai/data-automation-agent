@@ -25,4 +25,10 @@ public class TransformationRequest {
     private TargetDataType targetType;
     private MissingValueStrategy missingValueStrategy;
     private DuplicateStrategy duplicateStrategy;
+    private Boolean regex;
+    private Boolean matchEntireCell;
+    private Boolean caseInsensitive;
+    private Boolean trimWhitespace;
+    private Long baseVersion;
+    private String dateOrder; // "DMY", "MDY" or null = auto-detect
 }

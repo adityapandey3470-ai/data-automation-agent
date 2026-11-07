@@ -1,20 +1,30 @@
 package com.aditya.dataautomation.dashboard.service.impl;
 
+import com.aditya.dataautomation.common.util.NumericParser;
+import com.aditya.dataautomation.dashboard.entity.DashboardCollaboratorEntity;
+import com.aditya.dataautomation.dashboard.entity.DashboardEntity;
 import com.aditya.dataautomation.dashboard.exception.DashboardException;
 import com.aditya.dataautomation.dashboard.model.*;
+import com.aditya.dataautomation.dashboard.repository.DashboardCollaboratorRepository;
+import com.aditya.dataautomation.dashboard.repository.DashboardRepository;
 import com.aditya.dataautomation.dashboard.service.DashboardService;
 import com.aditya.dataautomation.excel.model.ExcelSheetData;
 import com.aditya.dataautomation.excel.model.ExcelWorkbookData;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.time.temporal.TemporalAccessor;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
@@ -28,11 +38,12 @@ public class DashboardServiceImpl implements DashboardService {
     private static final Pattern ISO_DATE_PATTERN = Pattern.compile("^\\d{4}[-/]\\d{1,2}[-/]\\d{1,2}.*");
     private static final Pattern ALT_DATE_PATTERN = Pattern.compile("^\\d{1,2}[-/]\\d{1,2}[-/]\\d{2,4}.*");
     private static final Pattern ID_COLUMN_PATTERN = Pattern.compile("^(id|.*_id|.*id|code|.*_code|zip|postal|ssn|phone|isbn|key)$");
-    private static final Pattern METRIC_NAME_STRONG = Pattern.compile(".*(revenue|sales|profit|amount|total|cost|price|income|budget|spend|balance|turnover).*");
-    private static final Pattern METRIC_NAME_MODERATE = Pattern.compile(".*(quantity|units|score|rating|discount|rate|weight|hours|count|target).*");
-    private static final Pattern DIMENSION_NAME = Pattern.compile(".*(category|region|segment|status|country|city|state|product|department|brand|customer|channel|gender|type|tier).*");
-    private static final Pattern AVERAGE_METRIC_PATTERN = Pattern.compile(".*(price|rate|unitprice|average|avg|score|rating|percentage|percent).*");
-    private static final Pattern SUM_METRIC_PATTERN = Pattern.compile(".*(amount|total|quantity|units|revenue|sales|cost|count|sum).*");
+    private static final Pattern METRIC_NAME_STRONG = Pattern.compile(".*(revenue|sales|profit|amount|amt|total|cost|price|income|budget|spend|exp|expense|balance|bal|turnover|rev|kamai|bikri|munafa|kharcha|rakam|laabh|kosh).*", Pattern.CASE_INSENSITIVE);
+    private static final Pattern METRIC_NAME_MODERATE = Pattern.compile(".*(quantity|qty|units|score|rating|discount|rate|weight|hours|count|target|val|value|volume|vol|dar|shulk).*", Pattern.CASE_INSENSITIVE);
+    private static final Pattern DIMENSION_NAME = Pattern.compile(".*(category|region|segment|status|country|city|state|product|department|brand|customer|channel|gender|type|tier|shreni|vibhag|sthan|graahak).*", Pattern.CASE_INSENSITIVE);
+    private static final Pattern AVERAGE_METRIC_PATTERN = Pattern.compile(".*(price|rate|unitprice|average|avg|score|rating|percentage|percent|dar|ausat).*", Pattern.CASE_INSENSITIVE);
+    private static final Pattern SUM_METRIC_PATTERN = Pattern.compile(".*(amount|amt|total|quantity|qty|units|revenue|rev|sales|cost|count|sum|exp|expense|turnover|kamai|bikri|munafa|kharcha|rakam).*", Pattern.CASE_INSENSITIVE);
+    private static final Pattern NEGATIVE_SENTIMENT_PATTERN = Pattern.compile(".*(cost|expense|spend|refund|return|churn|loss|defect|error|delay|latency|incident|waste|bounce|penalty|fine|damage|bad|cancel|dispute|tax|debt|liability|kharcha|nuksan).*", Pattern.CASE_INSENSITIVE);
 
     private static final DateTimeFormatter[] DATE_FORMATTERS = {
         DateTimeFormatter.ofPattern("yyyy/MM/dd", Locale.ENGLISH),
@@ -48,7 +59,79 @@ public class DashboardServiceImpl implements DashboardService {
     };
 
     private static final int MAX_DASHBOARDS = 200;
+    private static final int MAX_WIDGETS_JSON_BYTES = 5 * 1024 * 1024;
     private final Map<String, Dashboard> dashboards = new ConcurrentHashMap<>();
+
+    private final DashboardRepository dashboardRepository;
+    private final DashboardCollaboratorRepository collaboratorRepository;
+    private final ObjectMapper objectMapper;
+
+    @Autowired
+    public DashboardServiceImpl(DashboardRepository dashboardRepository,
+                                DashboardCollaboratorRepository collaboratorRepository,
+                                ObjectMapper objectMapper) {
+        this.dashboardRepository = dashboardRepository;
+        this.collaboratorRepository = collaboratorRepository;
+        this.objectMapper = objectMapper;
+    }
+
+    private void persistDashboard(Dashboard dashboard) {
+        if (dashboard == null || dashboard.getDashboardId() == null) return;
+        try {
+            String json = objectMapper.writeValueAsString(dashboard.getWidgets());
+            if (json.getBytes(StandardCharsets.UTF_8).length > MAX_WIDGETS_JSON_BYTES) {
+                throw new DashboardException("Dashboard size exceeds maximum limit of 5MB");
+            }
+            DashboardEntity entity = DashboardEntity.builder()
+                    .dashboardId(dashboard.getDashboardId())
+                    .userId(dashboard.getUserId())
+                    .fileId(dashboard.getFileId())
+                    .fileName(dashboard.getFileName())
+                    .name(dashboard.getName())
+                    .sheetName(dashboard.getSheetName())
+                    .widgetsJson(json)
+                    .createdAt(dashboard.getCreatedAt() != null ? dashboard.getCreatedAt() : LocalDateTime.now())
+                    .updatedAt(LocalDateTime.now())
+                    .build();
+            dashboardRepository.save(entity);
+        } catch (DashboardException de) {
+            throw de;
+        } catch (Exception e) {
+            log.error("Failed to persist dashboard to DB: {}", e.getMessage(), e);
+            throw new DashboardException("Failed to save dashboard to persistent storage: " + e.getMessage());
+        }
+    }
+
+    private Dashboard toDashboard(DashboardEntity entity) {
+        if (entity == null) return null;
+        List<DashboardWidget> widgets = new CopyOnWriteArrayList<>();
+        if (entity.getWidgetsJson() != null && !entity.getWidgetsJson().isBlank() && objectMapper != null) {
+            try {
+                List<DashboardWidget> parsed = objectMapper.readValue(entity.getWidgetsJson(), new TypeReference<List<DashboardWidget>>() {});
+                widgets.addAll(parsed);
+            } catch (Exception e) {
+                log.warn("Failed to deserialize widgets for dashboard {}: {}", entity.getDashboardId(), e.getMessage());
+            }
+        }
+        Dashboard d = Dashboard.builder()
+                .dashboardId(entity.getDashboardId())
+                .userId(entity.getUserId())
+                .fileId(entity.getFileId())
+                .fileName(entity.getFileName())
+                .name(entity.getName())
+                .sheetName(entity.getSheetName())
+                .createdAt(entity.getCreatedAt())
+                .widgets(widgets)
+                .build();
+        dashboards.put(d.getDashboardId(), d);
+        return d;
+    }
+
+    private Dashboard loadFromDb(String dashboardId) {
+        return dashboardRepository.findByDashboardId(dashboardId)
+                .map(this::toDashboard)
+                .orElse(null);
+    }
 
     @org.springframework.scheduling.annotation.Scheduled(fixedRate = 3600000)
     public void cleanupExpiredDashboards() {
@@ -93,6 +176,7 @@ public class DashboardServiceImpl implements DashboardService {
                 .build();
 
         dashboards.put(dashboard.getDashboardId(), dashboard);
+        persistDashboard(dashboard);
         log.info("Created dashboard '{}' (id={}) for userId={}, fileId={}", name, dashboard.getDashboardId(), userId, fileId);
         return dashboard;
     }
@@ -106,7 +190,7 @@ public class DashboardServiceImpl implements DashboardService {
     @Override
     public DashboardWidget addWidget(Long userId, String dashboardId, DashboardWidget widget, ExcelWorkbookData workbook) {
         validateWorkbook(workbook);
-        Dashboard dashboard = getDashboardAndVerifyOwnership(userId, dashboardId);
+        Dashboard dashboard = getDashboardWithPermission(userId, dashboardId, DashboardPermission.CUSTOMIZE);
 
         if (widget.getType() == null) {
             throw new DashboardException("Widget type is required");
@@ -122,6 +206,7 @@ public class DashboardServiceImpl implements DashboardService {
         computeWidgetData(widget, sheet);
 
         dashboard.addWidget(widget);
+        persistDashboard(dashboard);
         log.info("Added {} widget '{}' to dashboard '{}' by userId={}", widget.getType(), widget.getTitle(), dashboardId, userId);
         return widget;
     }
@@ -133,12 +218,13 @@ public class DashboardServiceImpl implements DashboardService {
 
     @Override
     public void removeWidget(Long userId, String dashboardId, String widgetId) {
-        Dashboard dashboard = getDashboardAndVerifyOwnership(userId, dashboardId);
+        Dashboard dashboard = getDashboardWithPermission(userId, dashboardId, DashboardPermission.CUSTOMIZE);
         boolean removed = dashboard.removeWidget(widgetId);
         if (!removed) {
             log.warn("Widget '{}' not found or already removed from dashboard '{}' by userId={}", widgetId, dashboardId, userId);
             throw new DashboardException("Widget not found: " + widgetId);
         }
+        persistDashboard(dashboard);
         log.info("Removed widget '{}' from dashboard '{}' by userId={}", widgetId, dashboardId, userId);
     }
 
@@ -150,7 +236,7 @@ public class DashboardServiceImpl implements DashboardService {
     @Override
     public Dashboard getDashboard(Long userId, String dashboardId, ExcelWorkbookData workbook) {
         validateWorkbook(workbook);
-        Dashboard dashboard = getDashboardAndVerifyOwnership(userId, dashboardId);
+        Dashboard dashboard = getDashboardWithPermission(userId, dashboardId, DashboardPermission.VIEW);
 
         List<DashboardWidget> widgets = new ArrayList<>(dashboard.getWidgets());
         for (DashboardWidget widget : widgets) {
@@ -168,41 +254,88 @@ public class DashboardServiceImpl implements DashboardService {
 
     @Override
     public Dashboard findDashboard(Long userId, String dashboardId) {
-        return getDashboardAndVerifyOwnership(userId, dashboardId);
+        return getDashboardWithPermission(userId, dashboardId, DashboardPermission.VIEW);
+    }
+
+    @Override
+    public Dashboard getDashboardWithPermission(Long userId, String dashboardId, DashboardPermission permission) {
+        if (dashboardId == null || dashboardId.isBlank()) {
+            throw new DashboardException("Dashboard ID must not be empty");
+        }
+        if (userId == null) {
+            throw new DashboardException("Authentication required to access dashboard");
+        }
+        if (permission == null) {
+            permission = DashboardPermission.VIEW;
+        }
+
+        Dashboard d = dashboards.get(dashboardId);
+        if (d == null) {
+            d = loadFromDb(dashboardId);
+        }
+        if (d == null) {
+            throw new DashboardException("Dashboard not found: " + dashboardId);
+        }
+
+        if (Objects.equals(d.getUserId(), userId)) {
+            return d;
+        }
+
+        if (permission == DashboardPermission.OWNER) {
+            log.warn("Access denied: userId={} attempted OWNER action on dashboardId={} owned by userId={}",
+                    userId, dashboardId, d.getUserId());
+            throw new DashboardException("Access denied: only dashboard owner can perform this action");
+        }
+
+        Optional<DashboardCollaboratorEntity> collabOpt = collaboratorRepository.findByDashboardIdAndSharedWithUserId(dashboardId, userId);
+        if (collabOpt.isEmpty()) {
+            log.warn("Access denied: userId={} is not a collaborator on dashboardId={}", userId, dashboardId);
+            throw new DashboardException("Dashboard not found or access denied");
+        }
+
+        DashboardCollaboratorEntity collab = collabOpt.get();
+        if (permission == DashboardPermission.CUSTOMIZE && !collab.isCanCustomize()) {
+            log.warn("Access denied: userId={} lacks CUSTOMIZE permission on dashboardId={}", userId, dashboardId);
+            throw new DashboardException("Access denied: customize permission not granted");
+        }
+
+        return d;
     }
 
     @Override
     public List<Dashboard> listDashboards(Long userId) {
         if (userId == null) userId = 0L;
         final Long uid = userId;
-        return dashboards.values().stream()
+
+        Map<String, Dashboard> merged = new LinkedHashMap<>();
+        dashboardRepository.findByUserIdOrderByCreatedAtDesc(uid).forEach(entity -> {
+            Dashboard d = toDashboard(entity);
+            if (d != null) {
+                merged.put(d.getDashboardId(), d);
+            }
+        });
+
+        dashboards.values().stream()
                 .filter(d -> Objects.equals(d.getUserId(), uid))
+                .forEach(d -> merged.putIfAbsent(d.getDashboardId(), d));
+
+        return merged.values().stream()
                 .sorted(Comparator.comparing(Dashboard::getCreatedAt).reversed())
                 .collect(Collectors.toList());
     }
 
     @Override
+    @org.springframework.transaction.annotation.Transactional
     public void deleteDashboard(Long userId, String dashboardId) {
-        Dashboard dashboard = getDashboardAndVerifyOwnership(userId, dashboardId);
+        Dashboard dashboard = getDashboardWithPermission(userId, dashboardId, DashboardPermission.OWNER);
         dashboards.remove(dashboard.getDashboardId());
+        dashboardRepository.deleteById(dashboard.getDashboardId());
+        collaboratorRepository.deleteByDashboardId(dashboard.getDashboardId());
         log.info("Deleted dashboard '{}' (id={}) by userId={}", dashboard.getName(), dashboardId, userId);
     }
 
     private Dashboard getDashboardAndVerifyOwnership(Long userId, String dashboardId) {
-        if (dashboardId == null || dashboardId.isBlank()) {
-            throw new DashboardException("Dashboard ID must not be empty");
-        }
-        Dashboard d = dashboards.get(dashboardId);
-        if (d == null) {
-            throw new DashboardException("Dashboard not found: " + dashboardId);
-        }
-
-        if (userId != null && !Objects.equals(d.getUserId(), userId)) {
-            log.warn("Access denied: userId={} attempted to access dashboardId={} owned by userId={}",
-                    userId, dashboardId, d.getUserId());
-            throw new DashboardException("Dashboard not found or access denied");
-        }
-        return d;
+        return getDashboardWithPermission(userId, dashboardId, DashboardPermission.VIEW);
     }
 
     private void validateWidgetConfig(DashboardWidget widget, ExcelSheetData sheet) {
@@ -291,22 +424,52 @@ public class DashboardServiceImpl implements DashboardService {
             return;
         }
 
+        // ---- Totals over ALL rows + PRIOR/RECENT windows for growth (O(n): dates parsed ONCE, no sorting) ----
         int totalRows = rows.size();
+        String dateCol = findDateColumn(sheet);
+        long[] ts = null;
+        long minT = Long.MAX_VALUE;
+        long maxT = Long.MIN_VALUE;
+        if (dateCol != null && totalRows > 1) {
+            ts = new long[totalRows];
+            for (int i = 0; i < totalRows; i++) {
+                Long t = parseDateToMillis(rows.get(i).get(dateCol));
+                if (t == null) {
+                    ts[i] = Long.MIN_VALUE;
+                } else {
+                    ts[i] = t;
+                    if (t < minT) minT = t;
+                    if (t > maxT) maxT = t;
+                }
+            }
+            if (maxT <= minT) ts = null; // no usable dates -> fall back to row halves
+        }
+
+        final long dayMs = 86_400_000L;
+        long recentStart = Long.MIN_VALUE;
+        long priorStart = Long.MIN_VALUE;
+        if (ts != null) {
+            long spanDays = (maxT - minT) / dayMs;
+            long windowDays = spanDays >= 60 ? 30 : (spanDays >= 14 ? 7 : Math.max(1, spanDays / 2));
+            recentStart = maxT - windowDays * dayMs;       // recent = last N days
+            priorStart = recentStart - windowDays * dayMs; // prior  = the N days before that
+        }
         int mid = totalRows / 2;
 
+        double sumAll = 0.0;
+        long countAll = 0;
+        long nonNullCells = 0;
+        double minAll = Double.MAX_VALUE;
+        double maxAll = -Double.MAX_VALUE;
         double sumPrior = 0.0;
         long countPrior = 0;
-        double minPrior = Double.MAX_VALUE;
-        double maxPrior = -Double.MAX_VALUE;
-
         double sumRecent = 0.0;
         long countRecent = 0;
-        double minRecent = Double.MAX_VALUE;
-        double maxRecent = -Double.MAX_VALUE;
 
         for (int i = 0; i < totalRows; i++) {
             Object raw = rows.get(i).get(column);
-            if (raw == null) continue;
+            if (raw == null || (raw instanceof String blank && blank.isBlank())) continue;
+            nonNullCells++;
 
             double d;
             if (raw instanceof Number n) {
@@ -317,52 +480,67 @@ public class DashboardServiceImpl implements DashboardService {
                 d = parsed;
             }
 
-            if (i < mid) {
-                sumPrior += d;
-                countPrior++;
-                if (d < minPrior) minPrior = d;
-                if (d > maxPrior) maxPrior = d;
+            sumAll += d;
+            countAll++;
+            if (d < minAll) minAll = d;
+            if (d > maxAll) maxAll = d;
+
+            boolean inRecent;
+            boolean inPrior;
+            if (ts != null) {
+                long t = ts[i];
+                inRecent = t != Long.MIN_VALUE && t > recentStart;
+                inPrior = t != Long.MIN_VALUE && t > priorStart && t <= recentStart;
             } else {
+                inRecent = i >= mid;
+                inPrior = i < mid;
+            }
+            if (inRecent) {
                 sumRecent += d;
                 countRecent++;
-                if (d < minRecent) minRecent = d;
-                if (d > maxRecent) maxRecent = d;
+            } else if (inPrior) {
+                sumPrior += d;
+                countPrior++;
             }
         }
 
-        long totalCount = countPrior + countRecent;
-        if (totalCount == 0) {
+        if (countAll == 0) {
             widget.setKpiValue(BigDecimal.ZERO);
             widget.setAlertStatus("NORMAL");
             return;
         }
 
-        double totalSum = sumPrior + sumRecent;
         double computedVal = switch (agg) {
-            case "SUM" -> totalSum;
-            case "AVERAGE" -> totalSum / totalCount;
-            case "MIN" -> Math.min(minPrior, minRecent);
-            case "MAX" -> Math.max(maxPrior, maxRecent);
-            default -> totalSum;
+            case "SUM" -> sumAll;
+            case "AVERAGE" -> sumAll / countAll;
+            case "MIN" -> minAll;
+            case "MAX" -> maxAll;
+            default -> sumAll;
         };
 
         BigDecimal kpiVal = BigDecimal.valueOf(computedVal).setScale(2, RoundingMode.HALF_UP);
         widget.setKpiValue(kpiVal);
 
-        if (countPrior > 0 && countRecent > 0) {
+        // fix 6: tell the user when many cells were ignored because they were not numeric
+        if (nonNullCells > 0 && countAll < nonNullCells) {
+            double coverage = 100.0 * countAll / nonNullCells;
+            if (coverage < 95.0) {
+                widget.setWarning(String.format(Locale.ROOT,
+                        "Only %.0f%% of values in '%s' are numeric. %d non-numeric value(s) were ignored.",
+                        coverage, widget.getColumnName(), nonNullCells - countAll));
+            }
+        }
+
+        if (!"MIN".equals(agg) && !"MAX".equals(agg) && countPrior > 0 && countRecent > 0) {
             double priorAggVal = switch (agg) {
                 case "SUM" -> sumPrior;
                 case "AVERAGE" -> sumPrior / countPrior;
-                case "MIN" -> minPrior;
-                case "MAX" -> maxPrior;
                 default -> sumPrior;
             };
 
             double recentAggVal = switch (agg) {
                 case "SUM" -> sumRecent;
                 case "AVERAGE" -> sumRecent / countRecent;
-                case "MIN" -> minRecent;
-                case "MAX" -> maxRecent;
                 default -> sumRecent;
             };
 
@@ -373,10 +551,11 @@ public class DashboardServiceImpl implements DashboardService {
         }
 
         if (widget.getGrowthRate() != null) {
+            boolean isNegative = widget.getColumnName() != null && NEGATIVE_SENTIMENT_PATTERN.matcher(widget.getColumnName()).matches();
             if (widget.getGrowthRate() >= 5.0) {
-                widget.setAlertStatus("SUCCESS");
+                widget.setAlertStatus(isNegative ? "WARNING" : "SUCCESS");
             } else if (widget.getGrowthRate() <= -5.0) {
-                widget.setAlertStatus("WARNING");
+                widget.setAlertStatus(isNegative ? "SUCCESS" : "WARNING");
             } else {
                 widget.setAlertStatus("NORMAL");
             }
@@ -385,16 +564,86 @@ public class DashboardServiceImpl implements DashboardService {
         }
     }
 
-    private void calculatePeriodGrowthForCount(DashboardWidget widget, ExcelSheetData sheet) {
-        int totalRows = sheet.getRowCount();
-        if (totalRows >= 2) {
-            int mid = totalRows / 2;
-            int prior = mid;
-            int recent = totalRows - mid;
-            if (prior > 0) {
-                double growth = ((double) (recent - prior) / prior) * 100.0;
-                setGrowthFields(widget, growth);
+    private String findDateColumn(ExcelSheetData sheet) {
+        if (sheet == null || sheet.getHeaders() == null) return null;
+        for (String h : sheet.getHeaders()) {
+            String lower = h.toLowerCase(Locale.ROOT);
+            if (lower.contains("date") || lower.contains("time") || lower.contains("created") || lower.contains("period") || lower.contains("timestamp")) {
+                return sheet.resolveColumnName(h);
             }
+        }
+        List<Map<String, Object>> rows = sheet.getRows();
+        if (rows != null && !rows.isEmpty()) {
+            int checkLimit = Math.min(rows.size(), 20);
+            for (String h : sheet.getHeaders()) {
+                String resolved = sheet.resolveColumnName(h);
+                int dateCount = 0;
+                for (int i = 0; i < checkLimit; i++) {
+                    if (isQuickDate(rows.get(i).get(resolved))) dateCount++;
+                }
+                if (dateCount >= Math.min(3, checkLimit)) {
+                    return resolved;
+                }
+            }
+        }
+        return null;
+    }
+
+    private void calculatePeriodGrowthForCount(DashboardWidget widget, ExcelSheetData sheet) {
+        List<Map<String, Object>> rows = sheet.getRows();
+        int totalRows = rows == null ? 0 : rows.size();
+        if (totalRows < 2) {
+            widget.setAlertStatus("NORMAL");
+            return;
+        }
+
+        long prior = 0;
+        long recent = 0;
+        boolean usedDates = false;
+
+        String dateCol = findDateColumn(sheet);
+        if (dateCol != null) {
+            long[] ts = new long[totalRows];
+            long minT = Long.MAX_VALUE;
+            long maxT = Long.MIN_VALUE;
+            for (int i = 0; i < totalRows; i++) {
+                Long t = parseDateToMillis(rows.get(i).get(dateCol));
+                if (t == null) {
+                    ts[i] = Long.MIN_VALUE;
+                } else {
+                    ts[i] = t;
+                    if (t < minT) minT = t;
+                    if (t > maxT) maxT = t;
+                }
+            }
+            if (maxT > minT) {
+                final long dayMs = 86_400_000L;
+                long spanDays = (maxT - minT) / dayMs;
+                long windowDays = spanDays >= 60 ? 30 : (spanDays >= 14 ? 7 : Math.max(1, spanDays / 2));
+                long recentStart = maxT - windowDays * dayMs;
+                long priorStart = recentStart - windowDays * dayMs;
+                for (int i = 0; i < totalRows; i++) {
+                    long t = ts[i];
+                    if (t == Long.MIN_VALUE) continue;
+                    if (t > recentStart) {
+                        recent++;
+                    } else if (t > priorStart) {
+                        prior++;
+                    }
+                }
+                usedDates = true;
+            }
+        }
+
+        if (!usedDates) { // no usable date column -> compare first half vs second half of the rows
+            int mid = totalRows / 2;
+            prior = mid;
+            recent = totalRows - mid;
+        }
+
+        if (prior > 0) {
+            double growth = ((double) (recent - prior) / prior) * 100.0;
+            setGrowthFields(widget, growth);
         }
         widget.setAlertStatus("NORMAL");
     }
@@ -474,22 +723,67 @@ public class DashboardServiceImpl implements DashboardService {
         Map<String, Map<String, Integer>> casingCounts = mergeSimilar ? new LinkedHashMap<>() : null;
         List<Map<String, Object>> rows = sheet.getRows() != null ? sheet.getRows() : Collections.emptyList();
 
-        for (Map<String, Object> row : rows) {
-            Object rawKey = row.get(catCol);
-            Object groupKey;
-            if (rawKey == null) {
-                groupKey = "(Blank)";
-            } else if (mergeSimilar) {
-                String rawStr = rawKey.toString().trim();
-                if (rawStr.isEmpty()) {
-                    rawStr = "(Blank)";
+        // ---- Time-series bucketing (LINE/AREA on a date column): group by day/week/month/... BEFORE aggregating ----
+        boolean timeChart = widget.getType() == WidgetType.LINE_CHART || widget.getType() == WidgetType.AREA_CHART;
+        long[] catTime = null;
+        String bucketMode = null;
+        if (timeChart && !rows.isEmpty()) {
+            String requested = config.getGranularity() == null
+                    ? "AUTO" : config.getGranularity().trim().toUpperCase(Locale.ROOT);
+            if (!"RAW".equals(requested)) {
+                catTime = new long[rows.size()];
+                long minT = Long.MAX_VALUE;
+                long maxT = Long.MIN_VALUE;
+                int valid = 0;
+                int nonBlank = 0;
+                for (int i = 0; i < catTime.length; i++) {
+                    Object c = rows.get(i).get(catCol);
+                    catTime[i] = Long.MIN_VALUE;
+                    if (c == null || c.toString().isBlank()) continue;
+                    nonBlank++;
+                    if (c instanceof Number) continue; // plain numbers are not dates here
+                    Long t = parseDateToMillis(c);
+                    if (t == null) continue;
+                    catTime[i] = t;
+                    valid++;
+                    if (t < minT) minT = t;
+                    if (t > maxT) maxT = t;
                 }
-                String norm = rawStr.toLowerCase();
+                if (nonBlank > 0 && valid >= 0.8 * nonBlank) {
+                    bucketMode = requested;
+                    if (!Set.of("DAY", "WEEK", "MONTH", "QUARTER", "YEAR").contains(bucketMode)) {
+                        long spanDays = (maxT - minT) / 86_400_000L;
+                        bucketMode = spanDays <= 50 ? "DAY" : spanDays <= 350 ? "WEEK" : spanDays <= 1500 ? "MONTH" : "YEAR";
+                    }
+                } else {
+                    catTime = null; // not really a date column -> leave it as a normal category chart
+                }
+            }
+        }
+
+        for (int rowIdx = 0; rowIdx < rows.size(); rowIdx++) {
+            Map<String, Object> row = rows.get(rowIdx);
+            Object rawKey = row.get(catCol);
+            String rawStr = (rawKey == null) ? "" : rawKey.toString().trim();
+            if (bucketMode != null && catTime[rowIdx] != Long.MIN_VALUE) {
+                rawStr = bucketLabel(catTime[rowIdx], bucketMode);
+            }
+            Object groupKey;
+            if (rawStr.isEmpty()) {
+                if (mergeSimilar) {
+                    groupKey = "(blank)";
+                    Map<String, Integer> counts = casingCounts.computeIfAbsent("(blank)", k -> new LinkedHashMap<>());
+                    counts.put("(Blank)", counts.getOrDefault("(Blank)", 0) + 1);
+                } else {
+                    groupKey = "(Blank)";
+                }
+            } else if (mergeSimilar) {
+                String norm = rawStr.toLowerCase(Locale.ROOT);
                 groupKey = norm;
                 Map<String, Integer> counts = casingCounts.computeIfAbsent(norm, k -> new LinkedHashMap<>());
                 counts.put(rawStr, counts.getOrDefault(rawStr, 0) + 1);
             } else {
-                groupKey = rawKey;
+                groupKey = rawStr;
             }
 
             GroupAcc acc = groups.computeIfAbsent(groupKey, k -> new GroupAcc());
@@ -506,7 +800,7 @@ public class DashboardServiceImpl implements DashboardService {
             }
         }
 
-        List<ChartConfig.ChartDataPoint> points = new ArrayList<>(groups.size());
+        Map<String, GroupAcc> labelToAcc = new LinkedHashMap<>();
         for (Map.Entry<Object, GroupAcc> entry : groups.entrySet()) {
             Object displayLabel = entry.getKey();
             if (mergeSimilar && casingCounts != null) {
@@ -525,8 +819,13 @@ public class DashboardServiceImpl implements DashboardService {
                     }
                 }
             }
+            labelToAcc.put(String.valueOf(displayLabel), entry.getValue());
+        }
+
+        List<ChartConfig.ChartDataPoint> points = new ArrayList<>(labelToAcc.size());
+        for (Map.Entry<String, GroupAcc> entry : labelToAcc.entrySet()) {
             points.add(ChartConfig.ChartDataPoint.builder()
-                    .label(displayLabel)
+                    .label(entry.getKey())
                     .value(entry.getValue().getResult(agg))
                     .build());
         }
@@ -542,36 +841,21 @@ public class DashboardServiceImpl implements DashboardService {
             List<ChartConfig.ChartDataPoint> top10 = new ArrayList<>(points.subList(0, 10));
             List<ChartConfig.ChartDataPoint> remainder = points.subList(10, points.size());
 
-            double sumOthers = 0.0;
-            long countOthers = 0;
-            Double minOthers = null;
-            Double maxOthers = null;
-
+            GroupAcc remainderAcc = new GroupAcc();
             for (ChartConfig.ChartDataPoint p : remainder) {
-                if (p.getValue() instanceof Number n) {
-                    double d = n.doubleValue();
-                    sumOthers += d;
-                    countOthers++;
-                    if (minOthers == null || d < minOthers) minOthers = d;
-                    if (maxOthers == null || d > maxOthers) maxOthers = d;
+                GroupAcc acc = labelToAcc.get(String.valueOf(p.getLabel()));
+                if (acc != null) {
+                    remainderAcc.sum += acc.sum;
+                    remainderAcc.count += acc.count;
+                    if (acc.min < remainderAcc.min) remainderAcc.min = acc.min;
+                    if (acc.max > remainderAcc.max) remainderAcc.max = acc.max;
                 }
             }
 
-            if (countOthers > 0) {
-                Object otherVal;
-                if ("AVERAGE".equalsIgnoreCase(agg)) {
-                    otherVal = Math.round((sumOthers / countOthers) * 100.0) / 100.0;
-                } else if ("MIN".equalsIgnoreCase(agg)) {
-                    otherVal = minOthers != null ? Math.round(minOthers * 100.0) / 100.0 : 0.0;
-                } else if ("MAX".equalsIgnoreCase(agg)) {
-                    otherVal = maxOthers != null ? Math.round(maxOthers * 100.0) / 100.0 : 0.0;
-                } else {
-                    otherVal = Math.round(sumOthers * 100.0) / 100.0;
-                }
-
+            if (remainderAcc.count > 0) {
                 top10.add(ChartConfig.ChartDataPoint.builder()
                         .label("Other (" + remainder.size() + " categories)")
-                        .value(otherVal)
+                        .value(remainderAcc.getResult(agg))
                         .build());
             }
             points = top10;
@@ -604,6 +888,20 @@ public class DashboardServiceImpl implements DashboardService {
         config.setDataPoints(points);
     }
 
+    /** First day of the day/week/month/quarter/year that contains the timestamp, as yyyy-MM-dd. */
+    private static String bucketLabel(long epochMillis, String mode) {
+        java.time.LocalDate d = java.time.Instant.ofEpochMilli(epochMillis)
+                .atZone(java.time.ZoneOffset.UTC).toLocalDate();
+        switch (mode) {
+            case "WEEK" -> d = d.with(java.time.temporal.TemporalAdjusters.previousOrSame(java.time.DayOfWeek.MONDAY));
+            case "MONTH" -> d = d.withDayOfMonth(1);
+            case "QUARTER" -> d = d.withMonth(((d.getMonthValue() - 1) / 3) * 3 + 1).withDayOfMonth(1);
+            case "YEAR" -> d = d.withDayOfYear(1);
+            default -> { }
+        }
+        return d.toString();
+    }
+
     private Long parseDateToMillis(Object val) {
         if (val == null) return null;
         if (val instanceof java.util.Date d) return d.getTime();
@@ -634,6 +932,29 @@ public class DashboardServiceImpl implements DashboardService {
             if (!Character.isLetter(c0)) return null;
         }
 
+        // FAST PATH: "yyyy-MM-dd", "yyyy-MM-dd HH:mm:ss", "yyyy-MM-ddTHH:mm:ss" without exceptions
+        if (s.length() >= 10 && s.charAt(4) == '-' && s.charAt(7) == '-') {
+            try {
+                int year = Integer.parseInt(s, 0, 4, 10);
+                int month = Integer.parseInt(s, 5, 7, 10);
+                int day = Integer.parseInt(s, 8, 10, 10);
+                if (s.length() == 10) {
+                    return java.time.LocalDate.of(year, month, day)
+                            .atStartOfDay(java.time.ZoneOffset.UTC).toInstant().toEpochMilli();
+                }
+                if (s.length() == 19 && (s.charAt(10) == ' ' || s.charAt(10) == 'T')
+                        && s.charAt(13) == ':' && s.charAt(16) == ':') {
+                    int hh = Integer.parseInt(s, 11, 13, 10);
+                    int mm = Integer.parseInt(s, 14, 16, 10);
+                    int ss = Integer.parseInt(s, 17, 19, 10);
+                    return java.time.LocalDateTime.of(year, month, day, hh, mm, ss)
+                            .toInstant(java.time.ZoneOffset.UTC).toEpochMilli();
+                }
+            } catch (RuntimeException ignored) {
+                // not a plain ISO date -> fall through to the slower parsers below
+            }
+        }
+
         try {
             return java.time.Instant.parse(s).toEpochMilli();
         } catch (Exception ignored) {}
@@ -660,7 +981,66 @@ public class DashboardServiceImpl implements DashboardService {
         if (original == null || original.size() <= targetBuckets) {
             return original;
         }
+        Long firstTime = null;
+        Long lastTime = null;
+        for (ChartConfig.ChartDataPoint p : original) {
+            Long t = parseDateToMillis(p.getLabel());
+            if (t != null) {
+                if (firstTime == null || t < firstTime) firstTime = t;
+                if (lastTime == null || t > lastTime) lastTime = t;
+            }
+        }
+
         List<ChartConfig.ChartDataPoint> sampled = new ArrayList<>(targetBuckets);
+        if (firstTime != null && lastTime != null && lastTime > firstTime) {
+            long duration = lastTime - firstTime;
+            long step = Math.max(1, duration / targetBuckets);
+            int origIdx = 0;
+            for (int b = 0; b < targetBuckets; b++) {
+                long bucketStart = firstTime + b * step;
+                long bucketEnd = (b == targetBuckets - 1) ? (lastTime + 1) : (bucketStart + step);
+                List<ChartConfig.ChartDataPoint> chunk = new ArrayList<>();
+                while (origIdx < original.size()) {
+                    ChartConfig.ChartDataPoint p = original.get(origIdx);
+                    Long t = parseDateToMillis(p.getLabel());
+                    if (t != null && t >= bucketEnd && !chunk.isEmpty()) {
+                        break;
+                    }
+                    chunk.add(p);
+                    origIdx++;
+                }
+                if (chunk.isEmpty()) continue;
+                String label = String.valueOf(chunk.get(chunk.size() / 2).getLabel());
+                double sum = 0.0;
+                int count = 0;
+                Double min = null;
+                Double max = null;
+                for (ChartConfig.ChartDataPoint p : chunk) {
+                    if (p.getValue() instanceof Number n) {
+                        double d = n.doubleValue();
+                        sum += d;
+                        count++;
+                        if (min == null || d < min) min = d;
+                        if (max == null || d > max) max = d;
+                    }
+                }
+                Object bucketVal;
+                if (count == 0) {
+                    bucketVal = 0.0;
+                } else if ("AVERAGE".equalsIgnoreCase(agg)) {
+                    bucketVal = Math.round((sum / count) * 100.0) / 100.0;
+                } else if ("MIN".equalsIgnoreCase(agg)) {
+                    bucketVal = min != null ? Math.round(min * 100.0) / 100.0 : 0.0;
+                } else if ("MAX".equalsIgnoreCase(agg)) {
+                    bucketVal = max != null ? Math.round(max * 100.0) / 100.0 : 0.0;
+                } else {
+                    bucketVal = Math.round(sum * 100.0) / 100.0;
+                }
+                sampled.add(ChartConfig.ChartDataPoint.builder().label(label).value(bucketVal).build());
+            }
+            if (!sampled.isEmpty()) return sampled;
+        }
+
         double bucketSize = (double) original.size() / targetBuckets;
 
         for (int b = 0; b < targetBuckets; b++) {
@@ -742,19 +1122,29 @@ public class DashboardServiceImpl implements DashboardService {
         List<Map<String, Object>> rows = sheet.getRows();
         if (rows == null || rows.isEmpty()) return;
 
-        int limit = Math.min(rows.size(), 200);
-        for (int i = 0; i < limit; i++) {
+        int total = rows.size();
+        int maxSamples = 1000;
+        int step = Math.max(1, total / maxSamples);
+        int numericCount = 0;
+        int nonNullCount = 0;
+        for (int i = 0; i < total && nonNullCount < maxSamples; i += step) {
             Object val = rows.get(i).get(resolved);
-            if (isQuickNumeric(val)) return;
+            if (val == null || (val instanceof String s && s.isBlank())) continue;
+            nonNullCount++;
+            if (NumericParser.isNumeric(val)) {
+                numericCount++;
+            }
         }
 
-        for (Map<String, Object> r : rows) {
-            Object val = r.get(resolved);
-            if (isQuickNumeric(val)) return;
+        if (nonNullCount == 0 || numericCount == 0) {
+            throw new DashboardException("Column '" + column + "' does not contain numeric values. Cannot perform numeric aggregation.");
         }
 
-        throw new DashboardException("Column '" + column + "' does not contain numeric values. "
-                + "Cannot perform numeric aggregation.");
+        double ratio = (double) numericCount / nonNullCount;
+        if (nonNullCount >= 5 && ratio < 0.50) {
+            throw new DashboardException("Column '" + column + "' is only " + Math.round(ratio * 100)
+                    + "% numeric. Clean or convert the column before aggregating it.");
+        }
     }
 
     @Override
@@ -1004,19 +1394,21 @@ public class DashboardServiceImpl implements DashboardService {
         List<String> headers = sheet.getHeaders() != null ? sheet.getHeaders() : Collections.emptyList();
         List<Map<String, Object>> rows = sheet.getRows() != null ? sheet.getRows() : Collections.emptyList();
 
-        int sampleSize = Math.min(rows.size(), 200);
+        int totalRows = rows.size();
+        int maxSamples = Math.min(totalRows, 300);
+        int step = (totalRows <= maxSamples) ? 1 : Math.max(1, totalRows / maxSamples);
 
         for (String col : headers) {
             ColumnProfile cp = new ColumnProfile();
             cp.name = col;
-            String lower = col.toLowerCase().trim();
+            String lower = col.toLowerCase(Locale.ROOT).trim();
 
             Set<Object> distinctSample = new HashSet<>();
             int numericCount = 0;
             int dateCount = 0;
             int nonNullCount = 0;
 
-            for (int r = 0; r < sampleSize; r++) {
+            for (int r = 0; r < totalRows && nonNullCount < maxSamples; r += step) {
                 Object v = rows.get(r).get(col);
                 if (v != null) {
                     nonNullCount++;
@@ -1032,7 +1424,7 @@ public class DashboardServiceImpl implements DashboardService {
             cp.distinctCount = distinctSample.size();
 
             cp.isIdLike = ID_COLUMN_PATTERN.matcher(lower).matches()
-                    || (cp.distinctCount == sampleSize && sampleSize > 10 && lower.contains("id"));
+                    || (cp.distinctCount == nonNullCount && nonNullCount > 10 && lower.contains("id"));
 
             double numericRatio = nonNullCount == 0 ? 0.0 : (double) numericCount / nonNullCount;
             boolean nameIndicatesDate = lower.contains("date") || lower.contains("time") || lower.contains("year")
@@ -1079,41 +1471,11 @@ public class DashboardServiceImpl implements DashboardService {
     }
 
     private static boolean isQuickNumeric(Object val) {
-        if (val == null) return false;
-        if (val instanceof Number) return true;
-        String s = val.toString().trim();
-        if (s.isEmpty()) return false;
-        int len = s.length();
-        int i = 0;
-        char first = s.charAt(0);
-        if (first == '+' || first == '-') i++;
-        if (i >= len) return false;
-        boolean hasDot = false;
-        boolean hasDigit = false;
-        for (; i < len; i++) {
-            char c = s.charAt(i);
-            if (c >= '0' && c <= '9') {
-                hasDigit = true;
-            } else if (c == '.' && !hasDot) {
-                hasDot = true;
-            } else if (c == ',') {
-                continue;
-            } else {
-                return false;
-            }
-        }
-        return hasDigit;
+        return NumericParser.isNumeric(val);
     }
 
     private static Double parseQuickDouble(Object val) {
-        if (val == null) return null;
-        if (val instanceof Number n) return n.doubleValue();
-        if (!isQuickNumeric(val)) return null;
-        try {
-            return Double.parseDouble(val.toString().trim().replace(",", ""));
-        } catch (Exception e) {
-            return null;
-        }
+        return NumericParser.parseDouble(val);
     }
 
     private static boolean isQuickDate(Object val) {
@@ -1135,7 +1497,9 @@ public class DashboardServiceImpl implements DashboardService {
             computeWidgetData(widget, sheet);
             dashboard.addWidget(widget);
         } catch (Exception e) {
-            log.debug("Skipping candidate widget '{}' ({}): {}", widget.getTitle(), widget.getType(), e.getMessage());
+            log.warn("Skipping candidate widget '{}' ({}): {}", widget.getTitle(), widget.getType(), e.getMessage());
+            String label = widget.getTitle() != null ? widget.getTitle() : String.valueOf(widget.getType());
+            dashboard.addSkippedWidget(label + ": " + e.getMessage());
         }
     }
 

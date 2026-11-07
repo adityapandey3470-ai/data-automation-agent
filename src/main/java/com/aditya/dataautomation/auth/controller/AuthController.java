@@ -98,4 +98,14 @@ public class AuthController {
         UserDto user = authService.getCurrentUser(principal.getId());
         return ResponseEntity.ok(user);
     }
+
+    @PostMapping("/logout")
+    @Operation(summary = "Logout and invalidate current session token")
+    public ResponseEntity<java.util.Map<String, Object>> logout(@RequestHeader(value = "Authorization", required = false) String authHeader) {
+        authService.logout(authHeader);
+        return ResponseEntity.ok(java.util.Map.of(
+                "success", true,
+                "message", "Logged out successfully"
+        ));
+    }
 }

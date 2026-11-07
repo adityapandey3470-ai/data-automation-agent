@@ -588,3 +588,22 @@ export const Building2 = ({ size = 16, className = '' }) => (
     <path d="M10 18h4" />
   </svg>
 );
+
+export const Share2 = ({ size = 16, className = '' }) => (
+  <svg width={size} height={size} {...iconProps} className={className}>
+    <circle cx="18" cy="5" r="3" />
+    <circle cx="6" cy="12" r="3" />
+    <circle cx="18" cy="19" r="3" />
+    <line x1="8.59" y1="13.51" x2="15.42" y2="17.49" />
+    <line x1="15.41" y1="6.51" x2="8.59" y2="10.49" />
+  </svg>
+);
+
+export const UserPlus = ({ size = 16, className = '' }) => (
+  <svg width={size} height={size} {...iconProps} className={className}>
+    <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+    <circle cx="8.5" cy="7" r="4" />
+    <line x1="20" y1="8" x2="20" y2="14" />
+    <line x1="23" y1="11" x2="17" y2="11" />
+  </svg>
+);

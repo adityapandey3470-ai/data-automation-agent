@@ -33,12 +33,38 @@ export default function DashboardCustomizerModal({
   if (!isOpen) return null;
 
   const handlePresetSelect = (presetId) => {
-    onUpdateDraft(prev => ({
-      ...prev,
-      style: presetId,
-      ...(presetId === 'dark' ? { palette: 'midnight_navy' } : {}),
-      ...(presetId === 'cyberpunk' ? { palette: 'cyber_neon' } : {})
-    }));
+    onUpdateDraft(prev => {
+      let updatedCard = { ...(prev.card || {}) };
+      let updatedPalette = prev.palette;
+
+      if (presetId === 'dark') {
+        updatedPalette = 'midnight_navy';
+        updatedCard = { ...updatedCard, style: 'bordered' };
+      } else if (presetId === 'cyberpunk') {
+        updatedPalette = 'cyber_neon';
+        updatedCard = { ...updatedCard, style: 'bordered', shadow: 'strong' };
+      } else if (presetId === 'glass') {
+        updatedCard = { ...updatedCard, style: 'glass', shadow: 'subtle' };
+      } else if (presetId === 'minimal') {
+        updatedCard = { ...updatedCard, style: 'flat', radius: 'sharp', shadow: 'none' };
+      } else if (presetId === 'neumorphic') {
+        updatedCard = { ...updatedCard, style: 'soft', radius: 'rounded', shadow: 'strong' };
+      } else if (presetId === 'bento') {
+        updatedCard = { ...updatedCard, style: 'bordered', radius: 'medium' };
+      } else if (presetId === 'matte') {
+        updatedCard = { ...updatedCard, style: 'soft', radius: 'medium', shadow: 'subtle' };
+      } else if (presetId === 'modern') {
+        updatedCard = { ...updatedCard, style: 'bordered', radius: 'medium', shadow: 'subtle' };
+      }
+
+      return {
+        ...prev,
+        style: presetId,
+        palette: updatedPalette,
+        card: updatedCard,
+        useCustomColors: false
+      };
+    });
   };
 
   const handlePaletteSelect = (paletteId) => {
@@ -144,7 +170,8 @@ export default function DashboardCustomizerModal({
 
   const handleToggleWidget = (id) => {
     onUpdateDraft(prev => {
-      const widgets = (prev.layout?.widgets || []).map(w => {
+      const widgetList = prev.layout?.widgets || DEFAULT_PREFERENCES.layout.widgets;
+      const widgets = widgetList.map(w => {
         if (w.id === id) return { ...w, visible: !w.visible };
         return w;
       });
@@ -160,7 +187,8 @@ export default function DashboardCustomizerModal({
 
   const handleMoveWidget = (index, direction) => {
     onUpdateDraft(prev => {
-      const widgets = [...(prev.layout?.widgets || [])];
+      const widgetList = prev.layout?.widgets || DEFAULT_PREFERENCES.layout.widgets;
+      const widgets = [...widgetList];
       const targetIndex = index + direction;
       if (targetIndex < 0 || targetIndex >= widgets.length) return prev;
 
@@ -523,7 +551,7 @@ export default function DashboardCustomizerModal({
                   Toggle visibility or use arrow buttons to arrange widgets:
                 </p>
                 <div className="dash-widget-list">
-                  {(draft.layout?.widgets || []).map((w, idx) => (
+                  {(draft.layout?.widgets || DEFAULT_PREFERENCES.layout.widgets).map((w, idx) => (
                     <div key={w.id} className="dash-widget-item">
                       <div className="dash-widget-info">
                         <button

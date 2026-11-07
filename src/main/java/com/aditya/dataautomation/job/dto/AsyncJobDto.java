@@ -15,6 +15,7 @@ import java.time.LocalDateTime;
 @AllArgsConstructor
 public class AsyncJobDto {
     private String jobId;
+    private Long userId;
     private JobType jobType;
     private String title;
     private JobStatus status;

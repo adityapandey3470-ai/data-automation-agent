@@ -28,6 +28,9 @@ public class Dashboard {
     @Builder.Default
     private List<DashboardWidget> widgets = new CopyOnWriteArrayList<>();
 
+    @Builder.Default
+    private List<String> skippedWidgets = new CopyOnWriteArrayList<>();
+
     public List<DashboardWidget> getWidgets() {
         if (widgets == null) {
             widgets = new CopyOnWriteArrayList<>();
@@ -40,6 +43,13 @@ public class Dashboard {
             widgets = new CopyOnWriteArrayList<>();
         }
         widgets.add(widget);
+    }
+
+    public void addSkippedWidget(String message) {
+        if (skippedWidgets == null) {
+            skippedWidgets = new CopyOnWriteArrayList<>();
+        }
+        skippedWidgets.add(message);
     }
 
     public boolean removeWidget(String widgetId) {

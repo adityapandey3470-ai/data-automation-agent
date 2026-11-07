@@ -26,6 +26,9 @@ public class ChartConfig {
 
     private Boolean mergeSimilarCategories;
 
+    /** For LINE/AREA charts on a date column: AUTO (default), DAY, WEEK, MONTH, QUARTER, YEAR or RAW. */
+    private String granularity;
+
     private List<ChartDataPoint> dataPoints;
 
     @Getter

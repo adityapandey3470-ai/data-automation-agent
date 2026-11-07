@@ -32,10 +32,6 @@ public class RateLimiterService {
         long windowMillis = (long) windowSeconds * 1000L;
         long windowStart = now - windowMillis;
 
-        if (requestWindows.size() > MAX_TRACKED_KEYS) {
-            pruneExpiredWindows(windowStart);
-        }
-
         final RateLimitResult[] result = new RateLimitResult[1];
 
         requestWindows.compute(key, (k, timestamps) -> {

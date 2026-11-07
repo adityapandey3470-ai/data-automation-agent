@@ -3,6 +3,7 @@ package com.aditya.dataautomation.cleaning.service.impl;
 import com.aditya.dataautomation.cleaning.exception.CleaningException;
 import com.aditya.dataautomation.cleaning.model.*;
 import com.aditya.dataautomation.cleaning.service.DataCleaningService;
+import com.aditya.dataautomation.common.util.NumericParser;
 import com.aditya.dataautomation.common.util.RowFingerprintUtil;
 import com.aditya.dataautomation.excel.model.ExcelSheetData;
 import com.aditya.dataautomation.excel.model.ExcelWorkbookData;
@@ -10,11 +11,15 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
 import java.util.*;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import java.util.regex.PatternSyntaxException;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -23,6 +28,36 @@ public class DataCleaningServiceImpl implements DataCleaningService {
 
     private static final DateTimeFormatter DATE_FMT = DateTimeFormatter.ofPattern("yyyy-MM-dd");
     private static final DateTimeFormatter DATETIME_FMT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+
+    private static final int MAX_REGEX_LENGTH = 200;
+    private static final long REGEX_TIME_BUDGET_NANOS = 5_000_000_000L; // 5 seconds per operation
+    private static final Pattern DAY_MONTH_PATTERN = Pattern.compile("^(\\d{1,2})[/-](\\d{1,2})[/-]\\d{4}.*");
+
+    private static final DateTimeFormatter[] FLEXIBLE_DATE_FORMATTERS = {
+            DateTimeFormatter.ofPattern("yyyy-MM-dd", Locale.ROOT),
+            DateTimeFormatter.ofPattern("yyyy/MM/dd", Locale.ROOT),
+            DateTimeFormatter.ofPattern("dd/MM/yyyy", Locale.ROOT),
+            DateTimeFormatter.ofPattern("dd-MM-yyyy", Locale.ROOT),
+            DateTimeFormatter.ofPattern("MM/dd/yyyy", Locale.ROOT),
+            DateTimeFormatter.ofPattern("MM-dd-yyyy", Locale.ROOT),
+            DateTimeFormatter.ofPattern("dd-MMM-yyyy", Locale.ROOT),
+            DateTimeFormatter.ofPattern("dd MMM yyyy", Locale.ROOT),
+            DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss", Locale.ROOT),
+            DateTimeFormatter.ofPattern("yyyy/MM/dd HH:mm:ss", Locale.ROOT)
+    };
+
+    private static final DateTimeFormatter[] MONTH_FIRST_FORMATTERS = {
+            DateTimeFormatter.ofPattern("yyyy-MM-dd", Locale.ROOT),
+            DateTimeFormatter.ofPattern("yyyy/MM/dd", Locale.ROOT),
+            DateTimeFormatter.ofPattern("MM/dd/yyyy", Locale.ROOT),
+            DateTimeFormatter.ofPattern("MM-dd-yyyy", Locale.ROOT),
+            DateTimeFormatter.ofPattern("dd/MM/yyyy", Locale.ROOT),
+            DateTimeFormatter.ofPattern("dd-MM-yyyy", Locale.ROOT),
+            DateTimeFormatter.ofPattern("dd-MMM-yyyy", Locale.ROOT),
+            DateTimeFormatter.ofPattern("dd MMM yyyy", Locale.ROOT),
+            DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss", Locale.ROOT),
+            DateTimeFormatter.ofPattern("yyyy/MM/dd HH:mm:ss", Locale.ROOT)
+    };
 
     @Override
     public CleaningResult execute(ExcelWorkbookData workbook, TransformationRequest request) {
@@ -51,6 +86,9 @@ public class DataCleaningServiceImpl implements DataCleaningService {
         validateWorkbook(workbook);
         if (requests == null || requests.isEmpty()) {
             throw new CleaningException("Pipeline must contain at least one transformation request");
+        }
+        if (requests.size() > 50) {
+            throw new CleaningException("Batch transformation pipeline is limited to a maximum of 50 operations per request");
         }
 
         List<CleaningResult> results = new ArrayList<>();
@@ -81,9 +119,9 @@ public class DataCleaningServiceImpl implements DataCleaningService {
         List<Map<String, Object>> cleaned;
 
         if (strategy == DuplicateStrategy.KEEP_FIRST) {
-            cleaned = deduplicateKeepFirst(original, keyColumns);
+            cleaned = deduplicateKeepFirst(original, keyColumns, request);
         } else {
-            cleaned = deduplicateKeepLast(original, keyColumns);
+            cleaned = deduplicateKeepLast(original, keyColumns, request);
         }
 
         int removed = original.size() - cleaned.size();
@@ -100,11 +138,11 @@ public class DataCleaningServiceImpl implements DataCleaningService {
                 .build();
     }
 
-    private List<Map<String, Object>> deduplicateKeepFirst(List<Map<String, Object>> rows, List<String> keyColumns) {
+    private List<Map<String, Object>> deduplicateKeepFirst(List<Map<String, Object>> rows, List<String> keyColumns, TransformationRequest request) {
         Set<String> seen = new LinkedHashSet<>();
         List<Map<String, Object>> result = new ArrayList<>();
         for (Map<String, Object> row : rows) {
-            String key = fingerprint(row, keyColumns);
+            String key = fingerprint(row, keyColumns, request);
             if (seen.add(key)) {
                 result.add(copyRow(row));
             }
@@ -112,13 +150,18 @@ public class DataCleaningServiceImpl implements DataCleaningService {
         return result;
     }
 
-    private List<Map<String, Object>> deduplicateKeepLast(List<Map<String, Object>> rows, List<String> keyColumns) {
-        Map<String, Map<String, Object>> lastSeen = new LinkedHashMap<>();
-        for (Map<String, Object> row : rows) {
-            String key = fingerprint(row, keyColumns);
-            lastSeen.put(key, row);
+    private List<Map<String, Object>> deduplicateKeepLast(List<Map<String, Object>> rows, List<String> keyColumns, TransformationRequest request) {
+        List<Map<String, Object>> reversedCleaned = new ArrayList<>();
+        Set<String> seen = new HashSet<>();
+        for (int i = rows.size() - 1; i >= 0; i--) {
+            Map<String, Object> row = rows.get(i);
+            String key = fingerprint(row, keyColumns, request);
+            if (seen.add(key)) {
+                reversedCleaned.add(copyRow(row));
+            }
         }
-        return lastSeen.values().stream().map(this::copyRow).collect(Collectors.toList());
+        Collections.reverse(reversedCleaned);
+        return reversedCleaned;
     }
 
     private CleaningResult handleMissingValues(ExcelWorkbookData workbook, TransformationRequest request) {
@@ -165,11 +208,16 @@ public class DataCleaningServiceImpl implements DataCleaningService {
             throw new CleaningException("Fill value must not be null for FILL_CONSTANT strategy");
         }
 
+        boolean colIsNumeric = isColumnNumeric(sheet, column);
+        Object actualFill = (colIsNumeric && NumericParser.isNumeric(fillValue))
+                ? NumericParser.parseBigDecimal(fillValue)
+                : fillValue;
+
         List<Map<String, Object>> rows = deepCopyRows(sheet.getRows());
         int changed = 0;
         for (Map<String, Object> row : rows) {
             if (isNullOrEmpty(row.get(column))) {
-                row.put(column, fillValue);
+                row.put(column, actualFill);
                 changed++;
             }
         }
@@ -181,7 +229,7 @@ public class DataCleaningServiceImpl implements DataCleaningService {
                 .rowsBefore(rows.size())
                 .rowsAfter(rows.size())
                 .cellsChanged(changed)
-                .message("Filled " + changed + " missing value(s) in '" + column + "' with '" + fillValue + "'")
+                .message("Filled " + changed + " missing value(s) in '" + column + "' with '" + actualFill + "'")
                 .cleanedWorkbook(newWorkbook)
                 .build();
     }
@@ -264,8 +312,8 @@ public class DataCleaningServiceImpl implements DataCleaningService {
                 String transformed = switch (op) {
                     case TRIM -> s.trim();
                     case NORMALIZE_WHITESPACE -> s.trim().replaceAll("\\s+", " ");
-                    case LOWERCASE -> s.toLowerCase();
-                    case UPPERCASE -> s.toUpperCase();
+                    case LOWERCASE -> s.toLowerCase(Locale.ROOT);
+                    case UPPERCASE -> s.toUpperCase(Locale.ROOT);
                     default -> s;
                 };
                 if (!s.equals(transformed)) {
@@ -405,14 +453,51 @@ public class DataCleaningServiceImpl implements DataCleaningService {
             throw new CleaningException("oldValue is required for REPLACE_VALUE");
         }
 
+        boolean isRegex = Boolean.TRUE.equals(request.getRegex());
+        boolean matchEntireCell = !Boolean.FALSE.equals(request.getMatchEntireCell());
+        String replacementText = newValue != null ? newValue.toString() : "";
+        Pattern pattern = null;
+        if (isRegex) {
+            String regexText = oldValue.toString();
+            if (regexText.length() > MAX_REGEX_LENGTH) {
+                throw new CleaningException("Regular expression is too long (max " + MAX_REGEX_LENGTH + " characters)");
+            }
+            try {
+                pattern = Pattern.compile(regexText);
+            } catch (PatternSyntaxException e) {
+                throw new CleaningException("Invalid regular expression: " + e.getDescription());
+            }
+        }
+        long regexDeadline = System.nanoTime() + REGEX_TIME_BUDGET_NANOS;
+        boolean colIsNumeric = isColumnNumeric(sheet, column);
+
         List<Map<String, Object>> rows = deepCopyRows(sheet.getRows());
         int changed = 0;
 
         for (Map<String, Object> row : rows) {
             Object cellVal = row.get(column);
-            if (valuesMatch(cellVal, oldValue)) {
-                row.put(column, newValue);
-                changed++;
+            if (cellVal == null) continue;
+
+            if (isRegex) {
+                String str = cellVal.toString();
+                String replaced = regexReplace(pattern, str, replacementText, regexDeadline);
+                if (!str.equals(replaced)) {
+                    row.put(column, colIsNumeric ? adaptNumeric(replaced) : replaced);
+                    changed++;
+                }
+            } else if (!matchEntireCell) {
+                String str = cellVal.toString();
+                String targetStr = oldValue.toString();
+                if (str.contains(targetStr)) {
+                    String replaced = str.replace(targetStr, newValue != null ? newValue.toString() : "");
+                    row.put(column, colIsNumeric ? adaptNumeric(replaced) : replaced);
+                    changed++;
+                }
+            } else {
+                if (valuesMatch(cellVal, oldValue)) {
+                    row.put(column, colIsNumeric ? adaptNumeric(newValue) : newValue);
+                    changed++;
+                }
             }
         }
 
@@ -428,6 +513,52 @@ public class DataCleaningServiceImpl implements DataCleaningService {
                 .build();
     }
 
+    /** "$1" backreferences work; a stray "$" or "\" is treated literally instead of crashing. */
+    private String regexReplace(Pattern pattern, String input, String replacement, long deadlineNanos) {
+        CharSequence guarded = new DeadlineCharSequence(input, deadlineNanos);
+        try {
+            return pattern.matcher(guarded).replaceAll(replacement);
+        } catch (CleaningException e) {
+            throw e;
+        } catch (IllegalArgumentException | IndexOutOfBoundsException e) {
+            return pattern.matcher(guarded).replaceAll(Matcher.quoteReplacement(replacement));
+        }
+    }
+
+    /** Aborts a regex that runs too long (protects the server from catastrophic patterns). */
+    private static final class DeadlineCharSequence implements CharSequence {
+        private final CharSequence inner;
+        private final long deadlineNanos;
+
+        DeadlineCharSequence(CharSequence inner, long deadlineNanos) {
+            this.inner = inner;
+            this.deadlineNanos = deadlineNanos;
+        }
+
+        @Override
+        public int length() {
+            return inner.length();
+        }
+
+        @Override
+        public char charAt(int index) {
+            if (System.nanoTime() > deadlineNanos) {
+                throw new CleaningException("Regular expression took too long. Please simplify the pattern.");
+            }
+            return inner.charAt(index);
+        }
+
+        @Override
+        public CharSequence subSequence(int start, int end) {
+            return new DeadlineCharSequence(inner.subSequence(start, end), deadlineNanos);
+        }
+
+        @Override
+        public String toString() {
+            return inner.toString();
+        }
+    }
+
     private CleaningResult convertType(ExcelWorkbookData workbook, TransformationRequest request) {
         ExcelSheetData sheet = resolveSheet(workbook, request.getSheetName());
         String column = resolveColumn(sheet, request.getColumnName());
@@ -437,7 +568,18 @@ public class DataCleaningServiceImpl implements DataCleaningService {
         }
 
         List<Map<String, Object>> rows = deepCopyRows(sheet.getRows());
+
+        boolean isDateTarget = targetType == TargetDataType.DATE || targetType == TargetDataType.DATETIME;
+        DateTimeFormatter[] dateFormatters = FLEXIBLE_DATE_FORMATTERS;
+        String dateOrder = null;
+        if (isDateTarget) {
+            dateOrder = resolveDateOrder(rows, column, request.getDateOrder());
+            dateFormatters = "MDY".equals(dateOrder) ? MONTH_FIRST_FORMATTERS : FLEXIBLE_DATE_FORMATTERS;
+        }
+
         int changed = 0;
+        int rounded = 0;
+        int ambiguous = 0;
 
         for (int i = 0; i < rows.size(); i++) {
             Map<String, Object> row = rows.get(i);
@@ -445,7 +587,12 @@ public class DataCleaningServiceImpl implements DataCleaningService {
             if (val == null) continue;
 
             try {
-                Object converted = convertValue(val, targetType);
+                Object converted = convertValue(val, targetType, dateFormatters);
+                if (targetType == TargetDataType.INTEGER) {
+                    BigDecimal exact = NumericParser.parseBigDecimal(val);
+                    if (exact != null && exact.stripTrailingZeros().scale() > 0) rounded++;
+                }
+                if (isDateTarget && isAmbiguousDayMonth(val)) ambiguous++;
                 if (!val.equals(converted)) {
                     row.put(column, converted);
                     changed++;
@@ -456,6 +603,15 @@ public class DataCleaningServiceImpl implements DataCleaningService {
             }
         }
 
+        StringBuilder msg = new StringBuilder("Converted " + changed + " value(s) in '" + column + "' to " + targetType);
+        if (rounded > 0) {
+            msg.append(". ").append(rounded).append(" value(s) had decimals and were rounded to whole numbers");
+        }
+        if (ambiguous > 0) {
+            msg.append(". ").append(ambiguous).append(" date(s) could be read either way; interpreted as ")
+               .append("MDY".equals(dateOrder) ? "MM/dd/yyyy" : "dd/MM/yyyy");
+        }
+
         ExcelWorkbookData newWorkbook = replaceSheet(workbook, sheet, rows, sheet.getHeaders());
         return CleaningResult.builder()
                 .operation("CONVERT_TYPE")
@@ -463,23 +619,32 @@ public class DataCleaningServiceImpl implements DataCleaningService {
                 .rowsBefore(rows.size())
                 .rowsAfter(rows.size())
                 .cellsChanged(changed)
-                .message("Converted " + changed + " value(s) in '" + column + "' to " + targetType)
+                .message(msg.toString())
                 .cleanedWorkbook(newWorkbook)
                 .build();
     }
 
     private Object convertValue(Object val, TargetDataType targetType) {
+        return convertValue(val, targetType, FLEXIBLE_DATE_FORMATTERS);
+    }
+
+    private Object convertValue(Object val, TargetDataType targetType, DateTimeFormatter[] dateFormatters) {
         String str = val.toString().trim();
         return switch (targetType) {
             case STRING -> str;
             case INTEGER -> {
-                if (val instanceof Number n) yield n.longValue();
-                yield Long.parseLong(str.contains(".") ? str.substring(0, str.indexOf('.')) : str);
+                BigDecimal bd = NumericParser.parseBigDecimal(val);
+                if (bd != null) {
+                    yield bd.setScale(0, RoundingMode.HALF_UP).longValue();
+                }
+                throw new CleaningException("Cannot convert '" + str + "' to INTEGER");
             }
             case DECIMAL -> {
-                if (val instanceof BigDecimal bd) yield bd;
-                if (val instanceof Number n) yield BigDecimal.valueOf(n.doubleValue());
-                yield new BigDecimal(str);
+                BigDecimal bd = NumericParser.parseBigDecimal(val);
+                if (bd != null) {
+                    yield bd;
+                }
+                throw new CleaningException("Cannot convert '" + str + "' to DECIMAL");
             }
             case BOOLEAN -> {
                 if (val instanceof Boolean b) yield b;
@@ -489,34 +654,68 @@ public class DataCleaningServiceImpl implements DataCleaningService {
             }
             case DATE -> {
                 if (val instanceof LocalDate ld) yield ld.format(DATE_FMT);
-
-                try {
-                    LocalDate.parse(str, DATE_FMT);
-                    yield str;
-                } catch (DateTimeParseException e) {
+                if (val instanceof LocalDateTime ldt) yield ldt.toLocalDate().format(DATE_FMT);
+                for (DateTimeFormatter dtf : dateFormatters) {
                     try {
-                        LocalDateTime dt = LocalDateTime.parse(str, DATETIME_FMT);
-                        yield dt.toLocalDate().format(DATE_FMT);
-                    } catch (DateTimeParseException e2) {
-                        throw new CleaningException("Cannot convert '" + str + "' to DATE");
-                    }
+                        LocalDate parsed = LocalDate.parse(str, dtf);
+                        yield parsed.format(DATE_FMT);
+                    } catch (DateTimeParseException ignored) {}
+                    try {
+                        LocalDateTime parsedDt = LocalDateTime.parse(str, dtf);
+                        yield parsedDt.toLocalDate().format(DATE_FMT);
+                    } catch (DateTimeParseException ignored) {}
                 }
+                throw new CleaningException("Cannot convert '" + str + "' to DATE");
             }
             case DATETIME -> {
                 if (val instanceof LocalDateTime ldt) yield ldt.format(DATETIME_FMT);
-                try {
-                    LocalDateTime.parse(str, DATETIME_FMT);
-                    yield str;
-                } catch (DateTimeParseException e) {
+                if (val instanceof LocalDate ld) yield ld.atStartOfDay().format(DATETIME_FMT);
+                for (DateTimeFormatter dtf : dateFormatters) {
                     try {
-                        LocalDate ld = LocalDate.parse(str, DATE_FMT);
-                        yield ld.atStartOfDay().format(DATETIME_FMT);
-                    } catch (DateTimeParseException e2) {
-                        throw new CleaningException("Cannot convert '" + str + "' to DATETIME");
-                    }
+                        LocalDateTime parsedDt = LocalDateTime.parse(str, dtf);
+                        yield parsedDt.format(DATETIME_FMT);
+                    } catch (DateTimeParseException ignored) {}
+                    try {
+                        LocalDate parsed = LocalDate.parse(str, dtf);
+                        yield parsed.atStartOfDay().format(DATETIME_FMT);
+                    } catch (DateTimeParseException ignored) {}
                 }
+                throw new CleaningException("Cannot convert '" + str + "' to DATETIME");
             }
         };
+    }
+
+    /** Decides dd/MM vs MM/dd for the whole column instead of guessing per value. */
+    private String resolveDateOrder(List<Map<String, Object>> rows, String column, String requested) {
+        if ("DMY".equalsIgnoreCase(requested) || "MDY".equalsIgnoreCase(requested)) {
+            return requested.toUpperCase(Locale.ROOT);
+        }
+        boolean dayFirstSeen = false;
+        boolean monthFirstSeen = false;
+        for (Map<String, Object> row : rows) {
+            Object v = row.get(column);
+            if (v == null) continue;
+            Matcher m = DAY_MONTH_PATTERN.matcher(v.toString().trim());
+            if (!m.matches()) continue;
+            int first = Integer.parseInt(m.group(1));
+            int second = Integer.parseInt(m.group(2));
+            if (first > 12 && second <= 12) dayFirstSeen = true;
+            if (second > 12 && first <= 12) monthFirstSeen = true;
+        }
+        if (dayFirstSeen && monthFirstSeen) {
+            throw new CleaningException("Column '" + column + "' mixes dd/MM/yyyy and MM/dd/yyyy dates. "
+                    + "Fix them first or choose the date order explicitly.");
+        }
+        return monthFirstSeen ? "MDY" : "DMY";
+    }
+
+    private boolean isAmbiguousDayMonth(Object val) {
+        if (val == null) return false;
+        Matcher m = DAY_MONTH_PATTERN.matcher(val.toString().trim());
+        if (!m.matches()) return false;
+        int first = Integer.parseInt(m.group(1));
+        int second = Integer.parseInt(m.group(2));
+        return first <= 12 && second <= 12 && first != second;
     }
 
     private void validateWorkbook(ExcelWorkbookData workbook) {
@@ -584,6 +783,38 @@ public class DataCleaningServiceImpl implements DataCleaningService {
 
     private String fingerprint(Map<String, Object> row, List<String> columns) {
         return RowFingerprintUtil.computeFingerprint(row, columns);
+    }
+
+    private String fingerprint(Map<String, Object> row, List<String> columns, TransformationRequest request) {
+        boolean caseInsensitive = Boolean.TRUE.equals(request.getCaseInsensitive());
+        boolean trimWhitespace = Boolean.TRUE.equals(request.getTrimWhitespace());
+        return RowFingerprintUtil.computeFingerprint(row, columns, caseInsensitive, trimWhitespace);
+    }
+
+    private boolean isColumnNumeric(ExcelSheetData sheet, String column) {
+        List<Map<String, Object>> rows = sheet.getRows();
+        if (rows == null || rows.isEmpty()) return false;
+        int numericCount = 0;
+        int nonNullCount = 0;
+        int total = rows.size();
+        int maxSamples = 500;
+        int step = Math.max(1, total / maxSamples);
+        for (int i = 0; i < total && nonNullCount < maxSamples; i += step) {
+            Object v = rows.get(i).get(column);
+            if (v != null && !v.toString().trim().isEmpty()) {
+                nonNullCount++;
+                if (NumericParser.isNumeric(v)) {
+                    numericCount++;
+                }
+            }
+        }
+        return nonNullCount > 0 && (double) numericCount / nonNullCount >= 0.50;
+    }
+
+    private Object adaptNumeric(Object val) {
+        if (val == null) return null;
+        BigDecimal bd = NumericParser.parseBigDecimal(val);
+        return bd != null ? bd : val;
     }
 
     private boolean isNullOrEmpty(Object val) {

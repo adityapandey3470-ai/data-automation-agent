@@ -36,6 +36,8 @@ public class AdminService {
     private final SupportTicketRepository supportTicketRepository;
     private final WorkingSessionRepository workingSessionRepository;
     private final AuditLogRepository auditLogRepository;
+    private final com.aditya.dataautomation.dashboard.repository.DashboardRepository dashboardRepository;
+    private final com.aditya.dataautomation.dashboard.repository.DashboardCollaboratorRepository dashboardCollaboratorRepository;
 
     public static final int DEFAULT_PAGE_SIZE = 50;
     public static final int MAX_PAGE_SIZE = 100;
@@ -74,18 +76,17 @@ public class AdminService {
 
     @Transactional(readOnly = true)
     public AdminStatsDto getStats() {
-        List<User> all = userRepository.findAll();
-        long totalUsers = all.size();
-        long activeUsers = all.stream().filter(User::isEnabled).count();
+        long totalUsers = userRepository.count();
+        long activeUsers = userRepository.countByEnabled(true);
         long disabledUsers = totalUsers - activeUsers;
-        long adminUsers = all.stream().filter(u -> "ROLE_ADMIN".equals(u.getRole())).count();
+        long adminUsers = userRepository.countByRole("ROLE_ADMIN");
         long totalProjects = projectRepository.count();
 
-        long freeUsers = all.stream().filter(u -> "FREE".equalsIgnoreCase(u.getSubscriptionTier()) || u.getSubscriptionTier() == null).count();
-        long proUsers = all.stream().filter(u -> "PRO".equalsIgnoreCase(u.getSubscriptionTier())).count();
-        long enterpriseUsers = all.stream().filter(u -> "ENTERPRISE".equalsIgnoreCase(u.getSubscriptionTier())).count();
-        long totalAiQueriesUsed = all.stream().mapToLong(u -> u.getAiQueriesUsed() != null ? u.getAiQueriesUsed() : 0).sum();
-        long totalTokensTracked = all.stream().mapToLong(u -> u.getTotalTokensUsed() != null ? u.getTotalTokensUsed() : 0L).sum();
+        long freeUsers = userRepository.countBySubscriptionTier("FREE");
+        long proUsers = userRepository.countBySubscriptionTier("PRO");
+        long enterpriseUsers = userRepository.countBySubscriptionTier("ENTERPRISE");
+        long totalAiQueriesUsed = userRepository.sumAiQueriesUsed();
+        long totalTokensTracked = userRepository.sumTotalTokensUsed();
 
         return AdminStatsDto.builder()
                 .totalUsers(totalUsers)
@@ -240,9 +241,9 @@ public class AdminService {
         List<AdminFileDto> files = new ArrayList<>();
         Map<Long, User> userCache = new HashMap<>();
 
-        List<Project> projects = projectRepository.findAll();
-        for (Project p : projects) {
-            User owner = p.getUser();
+        List<ProjectRepository.ProjectMetadataView> projects = projectRepository.findAllProjectMetadata();
+        for (ProjectRepository.ProjectMetadataView p : projects) {
+            ProjectRepository.ProjectMetadataView.UserMetadataView owner = p.getUser();
             files.add(AdminFileDto.builder()
                     .fileId(p.getId())
                     .fileName(p.getFileName() != null ? p.getFileName() : p.getName())
@@ -257,19 +258,20 @@ public class AdminService {
                     .build());
         }
 
-        List<WorkingSessionEntity> sessions = workingSessionRepository.findAll();
-        for (WorkingSessionEntity s : sessions) {
-            if (s.getUserId() != null && !userCache.containsKey(s.getUserId())) {
-                userRepository.findById(s.getUserId()).ifPresent(u -> userCache.put(s.getUserId(), u));
+        List<WorkingSessionRepository.SessionMetadataView> sessions = workingSessionRepository.findAllMetadataOrderByLastAccessedDesc();
+        for (WorkingSessionRepository.SessionMetadataView s : sessions) {
+            Long ownerId = s.getUserId();
+            if (ownerId != null && !userCache.containsKey(ownerId)) {
+                userRepository.findById(ownerId).ifPresent(u -> userCache.put(ownerId, u));
             }
-            User owner = userCache.get(s.getUserId());
+            User owner = ownerId != null ? userCache.get(ownerId) : null;
             files.add(AdminFileDto.builder()
                     .fileId(s.getFileId())
                     .fileName(s.getFileName() != null ? s.getFileName() : "Active Workbook")
                     .fileSize(s.getFileSize() != null ? s.getFileSize() : 0L)
-                    .ownerId(s.getUserId())
-                    .ownerName(owner != null ? owner.getName() : (s.getUserId() == 0L ? "Anonymous Guest" : "User #" + s.getUserId()))
-                    .ownerEmail(owner != null ? owner.getEmail() : (s.getUserId() == 0L ? "guest@tabufinery.io" : "user" + s.getUserId() + "@tabufinery.io"))
+                    .ownerId(ownerId)
+                    .ownerName(owner != null ? owner.getName() : (ownerId == null || ownerId == 0L ? "Anonymous Guest" : "User #" + ownerId))
+                    .ownerEmail(owner != null ? owner.getEmail() : (ownerId == null || ownerId == 0L ? "guest@tabufinery.io" : "user" + ownerId + "@tabufinery.io"))
                     .rowCount(null)
                     .columnCount(null)
                     .uploadedAt(s.getLastAccessed() != null ? s.getLastAccessed() : s.getCreatedAt())
@@ -349,6 +351,8 @@ public class AdminService {
         String userEmail = user.getEmail();
         String userName = user.getName();
 
+        dashboardCollaboratorRepository.deleteByOwnerIdOrSharedWithUserId(targetUserId, targetUserId);
+        dashboardRepository.deleteByUserId(targetUserId);
         userRepository.delete(user);
         log.info("Admin id={} permanently deleted user id={} ({})", currentAdminId, targetUserId, userEmail);
 
@@ -377,13 +381,11 @@ public class AdminService {
 
     @Transactional
     public int pruneAuditLogs(Long currentAdminId, String currentAdminEmail, Integer days) {
-        int deletedCount;
-        if (days == null || days <= 0) {
-            deletedCount = auditLogRepository.deleteAllLogs();
-        } else {
-            java.time.LocalDateTime cutoff = java.time.LocalDateTime.now().minusDays(days);
-            deletedCount = auditLogRepository.deleteByCreatedAtBefore(cutoff);
+        if (days == null || days < 30) {
+            throw new InvalidRequestException("Audit logs can only be pruned if they are older than at least 30 days.");
         }
+        java.time.LocalDateTime cutoff = java.time.LocalDateTime.now().minusDays(days);
+        int deletedCount = auditLogRepository.deleteByCreatedAtBefore(cutoff);
 
         log.info("Admin id={} pruned {} audit logs older than {} days", currentAdminId, deletedCount, days != null ? days : 0);
 

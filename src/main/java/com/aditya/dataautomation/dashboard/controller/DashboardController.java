@@ -5,6 +5,7 @@ import com.aditya.dataautomation.auth.repository.UserRepository;
 import com.aditya.dataautomation.auth.security.UserPrincipal;
 import com.aditya.dataautomation.dashboard.exception.DashboardException;
 import com.aditya.dataautomation.dashboard.model.Dashboard;
+import com.aditya.dataautomation.dashboard.model.DashboardPermission;
 import com.aditya.dataautomation.dashboard.model.DashboardWidget;
 import com.aditya.dataautomation.dashboard.service.DashboardService;
 import com.aditya.dataautomation.excel.model.ExcelWorkbookData;
@@ -111,7 +112,7 @@ public class DashboardController {
         }
 
         Long userId = getCurrentUserId();
-        Dashboard existing = dashboardService.findDashboard(userId, dashboardId);
+        Dashboard existing = dashboardService.getDashboardWithPermission(userId, dashboardId, DashboardPermission.CUSTOMIZE);
         ExcelWorkbookData workbook = getWorkbookOrThrow(userId, existing.getFileId());
 
         DashboardWidget widget = parseWidgetFromRequest(request);
@@ -133,7 +134,7 @@ public class DashboardController {
     @Operation(summary = "Get a dashboard with computed widget data with ownership check")
     public ResponseEntity<Dashboard> getDashboard(@PathVariable String dashboardId) {
         Long userId = getCurrentUserId();
-        Dashboard existing = dashboardService.findDashboard(userId, dashboardId);
+        Dashboard existing = dashboardService.getDashboardWithPermission(userId, dashboardId, DashboardPermission.VIEW);
         ExcelWorkbookData workbook = getWorkbookOrThrow(userId, existing.getFileId());
 
         Dashboard d = dashboardService.getDashboard(userId, dashboardId, workbook);

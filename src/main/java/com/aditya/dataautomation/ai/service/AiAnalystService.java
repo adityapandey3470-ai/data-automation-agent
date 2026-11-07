@@ -30,25 +30,10 @@ public class AiAnalystService {
     private final AiUsageService aiUsageService;
     private final UserRepository userRepository;
 
-    @Transactional
     public AiAnalystResponse ask(UserPrincipal principal, String question, String sheetName) {
         if (principal == null) {
             throw new InvalidRequestException("Authentication required. Please sign in to use the AI Analyst.");
         }
-
-        User user = userRepository.findById(principal.getId())
-                .orElseThrow(() -> new InvalidRequestException("User account not found"));
-
-        String tier = user.getSubscriptionTier() != null ? user.getSubscriptionTier().toUpperCase() : "FREE";
-        int used = user.getAiQueriesUsed() != null ? user.getAiQueriesUsed() : 0;
-        int limit = user.getAiQueriesLimit() != null ? user.getAiQueriesLimit() : 10;
-        boolean isAdmin = "ROLE_ADMIN".equals(user.getRole());
-
-        if (!isAdmin && !"ENTERPRISE".equals(tier) && used >= limit) {
-            throw new QuotaExceededException("You have reached your limit of " + limit + " AI queries for your " + tier + " plan. Please upgrade to Pro for higher limits.");
-        }
-
-        long startTime = System.currentTimeMillis();
 
         ExcelWorkbookData workbook = sessionHolder.get();
         if (workbook == null) {
@@ -68,64 +53,96 @@ public class AiAnalystService {
                     .build();
         }
 
-        DataProfileResponse profile = insightsService.generateProfile(sheet);
+        User user = userRepository.findById(principal.getId())
+                .orElseThrow(() -> new InvalidRequestException("User account not found"));
 
-        AiAnalystResponse response = null;
-        int promptTokens = 0;
-        int completionTokens = 0;
+        String tier = user.getSubscriptionTier() != null ? user.getSubscriptionTier().toUpperCase() : "FREE";
+        int limit = user.getAiQueriesLimit() != null ? user.getAiQueriesLimit() : 10;
+        boolean isAdmin = "ROLE_ADMIN".equals(user.getRole());
+        boolean isEnterprise = "ENTERPRISE".equals(tier);
+        boolean needsQuotaTracking = !isAdmin && !isEnterprise;
 
-        if (geminiClient.isAvailable()) {
-            try {
-                List<Map<String, Object>> sample = sheet.getRows() != null && !sheet.getRows().isEmpty()
-                        ? sheet.getRows().subList(0, Math.min(2, sheet.getRows().size()))
-                        : Collections.emptyList();
+        int reserved = userRepository.reserveAiQueryQuota(user.getId());
+        if (reserved == 0 && needsQuotaTracking) {
+            throw new QuotaExceededException("You have reached your limit of " + limit + " AI queries for your " + tier + " plan. Please upgrade to Pro for higher limits.");
+        }
 
-                JsonNode aiResult = geminiClient.askAnalyst(question, profile, sample);
-                if (aiResult != null && aiResult.has("answer")) {
-                    response = parseAiResult(aiResult, profile, startTime, question);
-                    promptTokens = Math.max(90, (question.length() + 850) / 4);
-                    completionTokens = Math.max(60, response.getAnswer().length() / 4);
+        boolean quotaReserved = (reserved > 0 && needsQuotaTracking);
+        long startTime = System.currentTimeMillis();
+
+        try {
+            DataProfileResponse profile = insightsService.generateProfile(sheet);
+
+            AiAnalystResponse response = null;
+            int promptTokens = 0;
+            int completionTokens = 0;
+
+            if (geminiClient.isAvailable()) {
+                try {
+                    List<Map<String, Object>> sample = sheet.getRows() != null && !sheet.getRows().isEmpty()
+                            ? sheet.getRows().subList(0, Math.min(2, sheet.getRows().size()))
+                            : Collections.emptyList();
+
+                    JsonNode aiResult = geminiClient.askAnalyst(question, profile, sample);
+                    if (aiResult != null && aiResult.has("answer")) {
+                        response = parseAiResult(aiResult, profile, startTime, question);
+                        promptTokens = Math.max(90, (question.length() + 850) / 4);
+                        completionTokens = Math.max(60, response.getAnswer().length() / 4);
+                    }
+                } catch (Exception e) {
+                    log.warn("Gemini execution error, reverting to deterministic fallback: {}", e.getMessage());
                 }
-            } catch (Exception e) {
-                log.warn("Gemini execution error, reverting to deterministic fallback: {}", e.getMessage());
+            }
+
+            boolean isAiEngine = (response != null && "GEMINI_AI".equalsIgnoreCase(response.getEngine()));
+
+            if (response == null) {
+                // If Gemini didn't answer (fallback used), refund the reserved query so user is not charged for deterministic fallback
+                if (quotaReserved) {
+                    userRepository.refundAiQueryQuota(user.getId());
+                    quotaReserved = false;
+                }
+                response = buildDeterministicFallback(question, profile, startTime);
+                promptTokens = Math.max(60, (question.length() + 300) / 4);
+                completionTokens = Math.max(40, response.getAnswer().length() / 4);
+            }
+
+            int totalTokens = promptTokens + completionTokens;
+            long latency = Math.max(1, System.currentTimeMillis() - startTime);
+
+            int updatedUsed = (user.getAiQueriesUsed() != null ? user.getAiQueriesUsed() : 0);
+            if (isAiEngine) {
+                userRepository.addAiTokens(user.getId(), totalTokens);
+                updatedUsed += 1;
+                quotaReserved = false; // Successfully used Gemini quota, do not refund in finally
+
+                aiUsageService.recordUsage(
+                        user.getId(),
+                        user.getEmail(),
+                        "AI_ANALYST",
+                        response.getModel() != null ? response.getModel() : geminiClient.getModelName(),
+                        promptTokens,
+                        completionTokens,
+                        latency,
+                        response.getStatus(),
+                        question
+                );
+            }
+
+            response.setSubscriptionTier(tier);
+            response.setQueriesUsed(updatedUsed);
+            response.setQueriesLimit(limit);
+            response.setRemainingQueries(isAdmin || isEnterprise ? 999999 : Math.max(0, limit - updatedUsed));
+            response.setTokensConsumed(isAiEngine ? totalTokens : 0);
+            response.setLatencyMs(latency);
+
+            return response;
+        } finally {
+            if (quotaReserved) {
+                userRepository.refundAiQueryQuota(user.getId());
+                quotaReserved = false;
             }
         }
-
-        if (response == null) {
-            response = buildDeterministicFallback(question, profile, startTime);
-            promptTokens = Math.max(60, (question.length() + 300) / 4);
-            completionTokens = Math.max(40, response.getAnswer().length() / 4);
-        }
-
-        int totalTokens = promptTokens + completionTokens;
-        long latency = Math.max(1, System.currentTimeMillis() - startTime);
-
-        aiUsageService.recordUsage(
-                user.getId(),
-                user.getEmail(),
-                "AI_ANALYST",
-                response.getModel() != null ? response.getModel() : geminiClient.getModelName(),
-                promptTokens,
-                completionTokens,
-                latency,
-                response.getStatus(),
-                question
-        );
-
-        int updatedUsed = used + 1;
-        long updatedTokens = (user.getTotalTokensUsed() != null ? user.getTotalTokensUsed() : 0L) + totalTokens;
-        user.setAiQueriesUsed(updatedUsed);
-        user.setTotalTokensUsed(updatedTokens);
-        userRepository.save(user);
-
-        response.setSubscriptionTier(tier);
-        response.setQueriesUsed(updatedUsed);
-        response.setQueriesLimit(limit);
-        response.setRemainingQueries(isAdmin || "ENTERPRISE".equals(tier) ? 999999 : Math.max(0, limit - updatedUsed));
-        response.setTokensConsumed(totalTokens);
-        response.setLatencyMs(latency);
-
-        return response;
     }
 
     @Transactional(readOnly = true)
