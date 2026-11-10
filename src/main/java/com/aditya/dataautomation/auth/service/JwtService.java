@@ -30,7 +30,7 @@ public class JwtService {
     public String generateToken(Long userId, String email, String name, String role) {
         try {
             long now = Instant.now().getEpochSecond();
-            long exp = Instant.now().plus(jwtProperties.getExpirationHours(), ChronoUnit.HOURS).getEpochSecond();
+            long exp = Instant.now().plus(jwtProperties.getAccessTokenMinutes(), ChronoUnit.MINUTES).getEpochSecond();
 
             String headerJson = "{\"alg\":\"HS256\",\"typ\":\"JWT\"}";
             String payloadJson = objectMapper.writeValueAsString(Map.of(

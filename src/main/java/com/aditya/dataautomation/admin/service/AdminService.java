@@ -36,6 +36,8 @@ public class AdminService {
     private final SupportTicketRepository supportTicketRepository;
     private final WorkingSessionRepository workingSessionRepository;
     private final AuditLogRepository auditLogRepository;
+    private final com.aditya.dataautomation.admin.repository.AiUsageMetricRepository aiUsageMetricRepository;
+    private final com.aditya.dataautomation.job.repository.AsyncJobRepository asyncJobRepository;
     private final com.aditya.dataautomation.dashboard.repository.DashboardRepository dashboardRepository;
     private final com.aditya.dataautomation.dashboard.repository.DashboardCollaboratorRepository dashboardCollaboratorRepository;
 
@@ -57,6 +59,16 @@ public class AdminService {
             auditLogRepository.save(logEntry);
         } catch (Exception e) {
             log.error("Failed to write audit log for action {}: {}", action, e.getMessage());
+            throw new IllegalStateException("Audit log could not be written; the action was rolled back", e);
+        }
+    }
+
+    /** Throws if {@code target} is the only enabled administrator. Locks all enabled admins first (race-safe). */
+    private void assertNotLastAdmin(User target) {
+        List<User> admins = userRepository.lockEnabledAdmins();
+        boolean targetIsEnabledAdmin = admins.stream().anyMatch(a -> a.getId().equals(target.getId()));
+        if (targetIsEnabledAdmin && admins.size() <= 1) {
+            throw new InvalidRequestException("This is the last active administrator and cannot be demoted, disabled or deleted.");
         }
     }
 
@@ -71,7 +83,17 @@ public class AdminService {
         int safeSize = (size <= 0) ? DEFAULT_PAGE_SIZE : Math.min(size, MAX_PAGE_SIZE);
         Pageable pageable = PageRequest.of(safePage, safeSize, Sort.by(Sort.Direction.ASC, "id"));
 
-        return userRepository.findAll(pageable).stream().map(this::toAdminUserDto).collect(Collectors.toList());
+        List<User> users = userRepository.findAll(pageable).getContent();
+        Map<Long, Integer> counts = new HashMap<>();
+        if (!users.isEmpty()) {
+            List<Long> ids = users.stream().map(User::getId).collect(Collectors.toList());
+            for (Object[] row : projectRepository.countByUserIds(ids)) {
+                counts.put(((Number) row[0]).longValue(), ((Number) row[1]).intValue());
+            }
+        }
+        return users.stream()
+                .map(u -> toAdminUserDto(u, counts.getOrDefault(u.getId(), 0)))
+                .collect(Collectors.toList());
     }
 
     @Transactional(readOnly = true)
@@ -111,6 +133,9 @@ public class AdminService {
         User user = userRepository.findById(targetUserId)
                 .orElseThrow(() -> new InvalidRequestException("User not found: " + targetUserId));
 
+        if (!enabled && "ROLE_ADMIN".equals(user.getRole())) {
+            assertNotLastAdmin(user);
+        }
         user.setEnabled(enabled);
         user = userRepository.save(user);
         log.info("Admin id={} updated user id={} status to enabled={}", currentAdminId, targetUserId, enabled);
@@ -134,6 +159,9 @@ public class AdminService {
         User user = userRepository.findById(targetUserId)
                 .orElseThrow(() -> new InvalidRequestException("User not found: " + targetUserId));
 
+        if ("ROLE_USER".equals(role) && "ROLE_ADMIN".equals(user.getRole())) {
+            assertNotLastAdmin(user);
+        }
         String oldRole = user.getRole();
         user.setRole(role);
         user = userRepository.save(user);
@@ -191,7 +219,10 @@ public class AdminService {
     }
 
     private AdminUserDto toAdminUserDto(User user) {
-        int projectCount = (int) projectRepository.countByUserId(user.getId());
+        return toAdminUserDto(user, (int) projectRepository.countByUserId(user.getId()));
+    }
+
+    private AdminUserDto toAdminUserDto(User user, int projectCount) {
         return AdminUserDto.builder()
                 .id(user.getId())
                 .name(user.getName())
@@ -259,11 +290,17 @@ public class AdminService {
         }
 
         List<WorkingSessionRepository.SessionMetadataView> sessions = workingSessionRepository.findAllMetadataOrderByLastAccessedDesc();
+        Set<Long> sessionOwnerIds = new HashSet<>();
+        for (WorkingSessionRepository.SessionMetadataView s : sessions) {
+            if (s.getUserId() != null) {
+                sessionOwnerIds.add(s.getUserId());
+            }
+        }
+        if (!sessionOwnerIds.isEmpty()) {
+            userRepository.findAllById(sessionOwnerIds).forEach(u -> userCache.put(u.getId(), u));
+        }
         for (WorkingSessionRepository.SessionMetadataView s : sessions) {
             Long ownerId = s.getUserId();
-            if (ownerId != null && !userCache.containsKey(ownerId)) {
-                userRepository.findById(ownerId).ifPresent(u -> userCache.put(ownerId, u));
-            }
             User owner = ownerId != null ? userCache.get(ownerId) : null;
             files.add(AdminFileDto.builder()
                     .fileId(s.getFileId())
@@ -285,7 +322,7 @@ public class AdminService {
             return b.getUploadedAt().compareTo(a.getUploadedAt());
         });
 
-        return files;
+        return files.size() > 1000 ? new ArrayList<>(files.subList(0, 1000)) : files;
     }
 
     @Transactional
@@ -342,15 +379,14 @@ public class AdminService {
                 .orElseThrow(() -> new InvalidRequestException("User not found: " + targetUserId));
 
         if ("ROLE_ADMIN".equals(user.getRole())) {
-            long adminCount = userRepository.countByRole("ROLE_ADMIN");
-            if (adminCount <= 1) {
-                throw new InvalidRequestException("Cannot delete the sole platform administrator account.");
-            }
+            assertNotLastAdmin(user);
         }
 
         String userEmail = user.getEmail();
         String userName = user.getName();
 
+        aiUsageMetricRepository.deleteByUserId(targetUserId);
+        asyncJobRepository.deleteAllByOwner(targetUserId);
         dashboardCollaboratorRepository.deleteByOwnerIdOrSharedWithUserId(targetUserId, targetUserId);
         dashboardRepository.deleteByUserId(targetUserId);
         userRepository.delete(user);
@@ -397,6 +433,6 @@ public class AdminService {
 
     @Transactional(readOnly = true)
     public List<AuditLog> listAuditLogs() {
-        return auditLogRepository.findTop200ByOrderByCreatedAtDesc();
+        return auditLogRepository.findTop200ByActionNotLikeOrderByCreatedAtDesc("DASHBOARD_%");
     }
 }

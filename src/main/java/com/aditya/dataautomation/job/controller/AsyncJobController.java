@@ -30,11 +30,13 @@ public class AsyncJobController {
 
     private final AsyncJobService asyncJobService;
     private final AsyncJobProcessor asyncJobProcessor;
+    private final com.aditya.dataautomation.idempotency.IdempotencyService idempotencyService;
 
     @PostMapping(value = "/excel-async", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     @Operation(summary = "Submit Excel file for non-blocking background parsing")
-    public ResponseEntity<AsyncJobDto> submitExcelFileAsync(
+    public ResponseEntity<?> submitExcelFileAsync(
             @RequestPart("file") MultipartFile file,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
             @AuthenticationPrincipal UserPrincipal principal) throws IOException {
         if (principal == null) {
             throw new AccessDeniedException("Authentication required to submit async jobs");
@@ -48,9 +50,16 @@ public class AsyncJobController {
         long fileSize = file.getSize();
         String contentType = file.getContentType();
 
-        AsyncJobDto job = asyncJobService.createJob(principal.getId(), JobType.FILE_IMPORT, "Async Import: " + fileName);
-
-        asyncJobProcessor.processExcelUploadAsync(job.getJobId(), principal.getId(), bytes, fileName, contentType, fileSize);
+        Object job = idempotencyService.execute(principal.getId(), "job-excel-async", idempotencyKey, () -> {
+            AsyncJobDto created = asyncJobService.createJob(principal.getId(), JobType.FILE_IMPORT, "Async Import: " + fileName);
+            try {
+                asyncJobProcessor.processExcelUploadAsync(created.getJobId(), principal.getId(), bytes, fileName, contentType, fileSize);
+            } catch (org.springframework.core.task.TaskRejectedException busy) {
+                asyncJobService.failJob(created.getJobId(), "Server is busy. Please try again in a minute.");
+                throw busy;
+            }
+            return created;
+        });
 
         return ResponseEntity.status(HttpStatus.ACCEPTED).body(job);
     }

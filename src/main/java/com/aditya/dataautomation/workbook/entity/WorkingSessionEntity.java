@@ -50,6 +50,15 @@ public class WorkingSessionEntity {
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
 
+    @Column(name = "history_size")
+    private Integer historySize;
+
+    @Column(name = "history_actions_json", columnDefinition = "TEXT")
+    private String historyActionsJson;
+
+    @Column(name = "summary_json", columnDefinition = "TEXT")
+    private String summaryJson;
+
     @Version
     @Column(name = "version")
     private Long version;

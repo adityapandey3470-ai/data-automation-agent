@@ -31,7 +31,7 @@ public class EmailService {
         return host != null && !host.isBlank() && !host.equalsIgnoreCase("localhost.disabled");
     }
 
-    @Async
+    @Async("emailTaskExecutor")
     public boolean sendVerificationEmail(String recipientEmail, String recipientName, String verificationLink) {
         if (!isSmtpConfigured()) {
             log.info("SMTP host not configured (app.mail.host). Skipping physical email delivery for {}", recipientEmail);
@@ -52,7 +52,7 @@ public class EmailService {
         }
     }
 
-    @Async
+    @Async("emailTaskExecutor")
     public boolean sendPasswordResetEmail(String recipientEmail, String resetLink) {
         if (!isSmtpConfigured()) {
             log.info("SMTP host not configured (app.mail.host). Skipping physical email delivery for {}", recipientEmail);
@@ -73,7 +73,7 @@ public class EmailService {
         }
     }
 
-    @Async
+    @Async("emailTaskExecutor")
     public boolean sendAccountAlreadyExistsEmail(String recipientEmail, String recipientName) {
         if (!isSmtpConfigured()) return false;
         try {
@@ -94,7 +94,7 @@ public class EmailService {
         }
     }
 
-    @Async
+    @Async("emailTaskExecutor")
     public boolean sendAccountLockoutAlert(String recipientEmail) {
         if (!isSmtpConfigured()) return false;
         try {
@@ -112,7 +112,29 @@ public class EmailService {
         }
     }
 
+    private final com.aditya.dataautomation.common.resilience.SimpleCircuitBreaker smtpBreaker =
+            new com.aditya.dataautomation.common.resilience.SimpleCircuitBreaker(5, 60_000);
+
+    /** Up to 3 attempts for network problems (1 s, 3 s pause); after 5 failures in a row SMTP is skipped for 60 s. */
     private void sendSmtpMessage(String to, String subject, String bodyHtml) throws Exception {
+        if (!smtpBreaker.allowRequest()) {
+            throw new IllegalStateException("SMTP temporarily unavailable (circuit open)");
+        }
+        try {
+            com.aditya.dataautomation.common.resilience.Retry.withBackoff(3, 1000,
+                    e -> e instanceof java.io.IOException,
+                    () -> {
+                        sendSmtpMessageOnce(to, subject, bodyHtml);
+                        return null;
+                    });
+            smtpBreaker.recordSuccess();
+        } catch (Exception e) {
+            smtpBreaker.recordFailure();
+            throw e;
+        }
+    }
+
+    private void sendSmtpMessageOnce(String to, String subject, String bodyHtml) throws Exception {
         String host = mailProperties.getHost();
         int port = mailProperties.getPort();
         String username = mailProperties.getUsername();

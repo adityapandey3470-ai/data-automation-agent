@@ -89,22 +89,23 @@ public class AsyncJobQueueIntegrationTest {
     @Test
     @DisplayName("Should create, update, and complete an async background job")
     void testAsyncJobLifecycle() {
-        AsyncJobDto job = asyncJobService.createJob(JobType.FILE_IMPORT, "Test 100K Rows Import");
+        User user = getOrCreateTestUser();
+        AsyncJobDto job = asyncJobService.createJob(user.getId(), JobType.FILE_IMPORT, "Test 100K Rows Import");
         assertThat(job.getJobId()).isNotNull();
         assertThat(job.getStatus()).isEqualTo(JobStatus.PENDING);
         assertThat(job.getProgress()).isEqualTo(0);
 
         asyncJobService.startJob(job.getJobId(), "Allocating worker thread");
-        AsyncJobDto runningJob = asyncJobService.getJob(job.getJobId());
+        AsyncJobDto runningJob = asyncJobService.getJob(job.getJobId(), user.getId());
         assertThat(runningJob.getStatus()).isEqualTo(JobStatus.RUNNING);
 
         asyncJobService.updateProgress(job.getJobId(), 45, "Parsed 45,000 rows");
-        AsyncJobDto progressJob = asyncJobService.getJob(job.getJobId());
+        AsyncJobDto progressJob = asyncJobService.getJob(job.getJobId(), user.getId());
         assertThat(progressJob.getProgress()).isEqualTo(45);
         assertThat(progressJob.getStatusMessage()).isEqualTo("Parsed 45,000 rows");
 
         asyncJobService.completeJob(job.getJobId(), "session-abc-123", "All rows imported successfully");
-        AsyncJobDto completedJob = asyncJobService.getJob(job.getJobId());
+        AsyncJobDto completedJob = asyncJobService.getJob(job.getJobId(), user.getId());
         assertThat(completedJob.getStatus()).isEqualTo(JobStatus.COMPLETED);
         assertThat(completedJob.getProgress()).isEqualTo(100);
         assertThat(completedJob.getResultData()).isEqualTo("session-abc-123");
@@ -114,11 +115,12 @@ public class AsyncJobQueueIntegrationTest {
     @Test
     @DisplayName("Should allow cancelling a pending or running job")
     void testJobCancellation() {
-        AsyncJobDto job = asyncJobService.createJob(JobType.BATCH_ANALYSIS, "Heavy Pivot Calculation");
-        boolean cancelled = asyncJobService.cancelJob(job.getJobId());
+        User user = getOrCreateTestUser();
+        AsyncJobDto job = asyncJobService.createJob(user.getId(), JobType.BATCH_ANALYSIS, "Heavy Pivot Calculation");
+        boolean cancelled = asyncJobService.cancelJob(job.getJobId(), user.getId());
         assertThat(cancelled).isTrue();
 
-        AsyncJobDto cancelledJob = asyncJobService.getJob(job.getJobId());
+        AsyncJobDto cancelledJob = asyncJobService.getJob(job.getJobId(), user.getId());
         assertThat(cancelledJob.getStatus()).isEqualTo(JobStatus.CANCELLED);
     }
 

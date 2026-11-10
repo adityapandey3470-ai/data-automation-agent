@@ -12,6 +12,11 @@ public interface AiUsageMetricRepository extends JpaRepository<AiUsageMetric, Lo
 
     long countByFeature(String feature);
 
+    @org.springframework.data.jpa.repository.Modifying
+    @org.springframework.transaction.annotation.Transactional
+    @Query("DELETE FROM AiUsageMetric m WHERE m.userId = :userId")
+    int deleteByUserId(@org.springframework.data.repository.query.Param("userId") Long userId);
+
     long countByStatus(String status);
 
     @Query("SELECT COALESCE(SUM(m.totalTokens), 0) FROM AiUsageMetric m")

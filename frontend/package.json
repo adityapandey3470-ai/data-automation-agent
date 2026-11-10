@@ -9,6 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@stomp/stompjs": "^7.0.0",
     "@tanstack/react-virtual": "^3.14.24",
     "axios": "^1.7.2",
     "html2canvas": "^1.4.1",

@@ -16,6 +16,7 @@ import org.springframework.web.filter.OncePerRequestFilter;
 import java.io.IOException;
 import java.time.LocalDateTime;
 import java.util.Map;
+import com.aditya.dataautomation.auth.service.JwtService;
 
 @Slf4j
 @Component
@@ -24,6 +25,7 @@ public class RateLimitingFilter extends OncePerRequestFilter {
 
     private final RateLimiterService rateLimiterService;
     private final ObjectMapper objectMapper;
+    private final JwtService jwtService;
 
     @Value("${app.security.behind-proxy:false}")
     private boolean behindProxy;
@@ -36,11 +38,23 @@ public class RateLimitingFilter extends OncePerRequestFilter {
                                     HttpServletResponse response,
                                     FilterChain filterChain) throws ServletException, IOException {
 
-        String path = request.getRequestURI();
+        String path = request.getServletPath();
+        if (request.getPathInfo() != null) {
+            path = path + request.getPathInfo();
+        }
         String method = request.getMethod();
         String clientIp = extractClientIp(request);
+        request.setAttribute("clientIp", clientIp);
 
         RateLimiterService.RateLimitResult res;
+
+        if (path.startsWith("/api/")) {
+            res = rateLimiterService.tryAcquireWithResult("api:" + clientIp, 600, 60);
+            if (!res.allowed()) {
+                rejectRateLimit(response, path, "Request rate limit exceeded. Please wait a moment.", res.retryAfterSeconds());
+                return;
+            }
+        }
 
         if ("POST".equalsIgnoreCase(method) && path.equals("/api/v1/auth/login")) {
             res = rateLimiterService.tryAcquireWithResult("login:" + clientIp, 15, 60);
@@ -106,7 +120,95 @@ public class RateLimitingFilter extends OncePerRequestFilter {
             }
         }
 
+        // ---- additional per-IP limits for endpoints that were previously only covered by the generic limit ----
+        if ("POST".equalsIgnoreCase(method) && path.equals("/api/v1/auth/refresh")) {
+            res = rateLimiterService.tryAcquireWithResult("refresh:" + clientIp, 30, 60);
+            if (!res.allowed()) {
+                rejectRateLimit(response, path, "Too many session refresh requests. Please wait a moment.", res.retryAfterSeconds());
+                return;
+            }
+        }
+
+        if ("POST".equalsIgnoreCase(method) && path.equals("/api/v1/auth/resend-verification")) {
+            res = rateLimiterService.tryAcquireWithResult("resend:" + clientIp, 5, 300);
+            if (!res.allowed()) {
+                rejectRateLimit(response, path, "Too many verification email requests. Please wait a few minutes.", res.retryAfterSeconds());
+                return;
+            }
+        }
+
+        if ("POST".equalsIgnoreCase(method) && path.equals("/api/v1/auth/verify-email")) {
+            res = rateLimiterService.tryAcquireWithResult("verify:" + clientIp, 20, 300);
+            if (!res.allowed()) {
+                rejectRateLimit(response, path, "Too many verification attempts. Please wait a few minutes.", res.retryAfterSeconds());
+                return;
+            }
+        }
+
+        if (path.startsWith("/ws")) {
+            res = rateLimiterService.tryAcquireWithResult("ws:" + clientIp, 60, 60);
+            if (!res.allowed()) {
+                rejectRateLimit(response, path, "Too many connection attempts. Please wait a moment.", res.retryAfterSeconds());
+                return;
+            }
+        }
+
+        // ---- per-USER limits (an attacker rotating IPs, or many users behind one NAT, are handled separately) ----
+        if (path.startsWith("/api/") && !"GET".equalsIgnoreCase(method) && !"OPTIONS".equalsIgnoreCase(method)) {
+            Long userId = resolveUserId(request);
+            if (userId != null) {
+                String bucket = null;
+                int limit = 0;
+                int window = 60;
+                String msg = "Too many requests. Please wait a moment.";
+
+                if (path.startsWith("/api/v1/ai/")) {
+                    bucket = "ai-user"; limit = 30; window = 60;
+                    msg = "AI service rate limit exceeded for your account. Please wait a moment.";
+                } else if (path.startsWith("/api/v1/jobs/")) {
+                    bucket = "jobs-user"; limit = 10; window = 60;
+                    msg = "Too many background jobs started. Please wait a moment.";
+                } else if (path.startsWith("/api/v1/files/")) {
+                    bucket = "upload-user"; limit = 20; window = 60;
+                    msg = "File upload rate limit reached for your account.";
+                } else if (path.startsWith("/api/v1/support/ticket")) {
+                    bucket = "ticket-user"; limit = 5; window = 600;
+                    msg = "Support ticket limit reached. Please wait before creating another ticket.";
+                } else if (path.startsWith("/api/v1/support/chat")) {
+                    bucket = "chat-user"; limit = 20; window = 60;
+                    msg = "Support chat rate limit reached. Please wait a moment.";
+                } else if (path.startsWith("/api/v1/projects/save")) {
+                    bucket = "save-user"; limit = 30; window = 60;
+                    msg = "Too many save requests. Please wait a moment.";
+                } else if (path.startsWith("/api/v1/dashboard/collaboration/share")) {
+                    bucket = "share-user"; limit = 20; window = 600;
+                    msg = "Too many dashboard invitations. Please wait before inviting more people.";
+                }
+
+                if (bucket != null) {
+                    res = rateLimiterService.tryAcquireWithResult(bucket + ":" + userId, limit, window);
+                    if (!res.allowed()) {
+                        rejectRateLimit(response, path, msg, res.retryAfterSeconds());
+                        return;
+                    }
+                }
+            }
+        }
+
         filterChain.doFilter(request, response);
+    }
+
+    /** Best-effort user id from a valid Bearer token (signature + expiry checked). Returns null when absent/invalid. */
+    private Long resolveUserId(HttpServletRequest request) {
+        String header = request.getHeader("Authorization");
+        if (header == null || !header.startsWith("Bearer ")) {
+            return null;
+        }
+        try {
+            return jwtService.extractUserId(header.substring(7));
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     private String extractClientIp(HttpServletRequest request) {

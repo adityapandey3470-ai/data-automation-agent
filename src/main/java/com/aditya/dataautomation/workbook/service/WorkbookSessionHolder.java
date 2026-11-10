@@ -27,6 +27,9 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.*;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
+import com.aditya.dataautomation.exception.InvalidRequestException;
 
 @Slf4j
 @Component
@@ -36,12 +39,12 @@ public class WorkbookSessionHolder {
     private static final int MAX_HISTORY = 3;
     private static final int MAX_WORKBOOKS_PER_USER = 20;
     private static final int MAX_CACHED_WORKBOOKS = 15;
-    private static final long SESSION_TTL_MILLIS = 2 * 60 * 60 * 1000L;
+    private static final long SESSION_TTL_MILLIS = 24 * 60 * 60 * 1000L;
+    private static final long MAX_STORED_CHARS_PER_USER = 150_000_000L;
 
     private final WorkingSessionRepository workingSessionRepository;
     private final UserRepository userRepository;
     private final ObjectMapper objectMapper;
-    private final java.util.concurrent.ConcurrentHashMap<Long, Object> userLocks = new java.util.concurrent.ConcurrentHashMap<>();
 
     private static class CachedWorkbook {
         final Long version;
@@ -122,9 +125,15 @@ public class WorkbookSessionHolder {
         return deserialized;
     }
 
-    private Object getLock(Long userId) {
-        if (userId == null) return this;
-        return userLocks.computeIfAbsent(userId, k -> new Object());
+    /**
+     * Cluster-wide per-user mutex: row lock on the user, held until the surrounding transaction ends.
+     * (A JVM-level synchronized block inside @Transactional releases BEFORE commit and does not work across instances.)
+     * Callers must be @Transactional.
+     */
+    private void lockUser(Long userId) {
+        if (userId != null) {
+            userRepository.findByIdForUpdate(userId);
+        }
     }
 
     @Getter
@@ -186,19 +195,121 @@ public class WorkbookSessionHolder {
         if (userId == null) {
             return Optional.empty();
         }
-        Optional<WorkingSessionEntity> active = workingSessionRepository.findByUserIdAndIsActiveTrue(userId);
+        Optional<WorkingSessionEntity> active = workingSessionRepository.findFirstByUserIdAndIsActiveTrueOrderByLastAccessedDesc(userId);
         if (active.isPresent()) {
             return active;
         }
-        List<WorkingSessionEntity> list = workingSessionRepository.findByUserIdOrderByCreatedAtAsc(userId);
-        if (!list.isEmpty()) {
-            WorkingSessionEntity latest = list.get(list.size() - 1);
-            latest.setIsActive(true);
-            latest.setLastAccessed(LocalDateTime.now());
-            workingSessionRepository.save(latest);
+        Optional<WorkingSessionEntity> latestOpt = workingSessionRepository.findFirstByUserIdOrderByCreatedAtDesc(userId);
+        if (latestOpt.isPresent()) {
+            WorkingSessionEntity latest = latestOpt.get();
+            // self-heal only when we are allowed to write (a read-only transaction must not modify rows)
+            if (!TransactionSynchronizationManager.isCurrentTransactionReadOnly()) {
+                latest.setIsActive(true);
+                latest.setLastAccessed(LocalDateTime.now());
+                workingSessionRepository.save(latest);
+            }
             return Optional.of(latest);
         }
         return Optional.empty();
+    }
+
+    /**
+     * Cache is invalidated immediately and re-populated only AFTER the transaction commits, with the real
+     * (flushed) version. This prevents serving uncommitted data and keeps rolled-back data out of the cache.
+     */
+    private void cacheAfterCommit(WorkingSessionEntity session, int currentIndex, ExcelWorkbookData workbook) {
+        final String fileId = session.getFileId();
+        final Runnable put = () -> {
+            CachedWorkbook cw = new CachedWorkbook(session.getVersion(), currentIndex, workbook);
+            workbookCache.put(fileId, cw);
+            summaryCache.put(fileId, new CachedSummary(session.getVersion(), currentIndex, cw.sheetCount, cw.totalRows, cw.sheetNames));
+        };
+        workbookCache.remove(fileId);
+        summaryCache.remove(fileId);
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    put.run();
+                }
+            });
+        } else {
+            put.run();
+        }
+    }
+
+    private String summaryJsonOf(ExcelWorkbookData wb) {
+        int sheets = 0;
+        int rows = 0;
+        List<String> names = new ArrayList<>();
+        if (wb != null && wb.getSheets() != null) {
+            sheets = wb.getSheets().size();
+            for (ExcelSheetData s : wb.getSheets()) {
+                if (s != null) {
+                    rows += s.getRowCount();
+                    names.add(s.getSheetName());
+                }
+            }
+        }
+        try {
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("sheetCount", sheets);
+            m.put("totalRows", rows);
+            m.put("sheetNames", names);
+            return objectMapper.writeValueAsString(m);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private CachedSummary summaryFromJson(String json, Long version, Integer currentIndex) {
+        if (json == null || json.isBlank()) {
+            return null;
+        }
+        try {
+            com.fasterxml.jackson.databind.JsonNode n = objectMapper.readTree(json);
+            List<String> names = new ArrayList<>();
+            n.path("sheetNames").forEach(x -> names.add(x.asText()));
+            return new CachedSummary(version, currentIndex, n.path("sheetCount").asInt(0), n.path("totalRows").asInt(0),
+                    Collections.unmodifiableList(names));
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private String actionsJson(List<HistoryState> history) {
+        List<String> actions = new ArrayList<>();
+        for (HistoryState h : history) {
+            actions.add(h.getActionDescription());
+        }
+        try {
+            return objectMapper.writeValueAsString(actions);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /** Undo-history size without deserializing the (large) history blob; falls back for legacy rows. */
+    private int historySizeOf(WorkingSessionEntity s) {
+        if (s.getHistorySize() != null) {
+            return s.getHistorySize();
+        }
+        return deserializeHistory(s.getHistoryJson()).size();
+    }
+
+    private List<String> actionsOf(WorkingSessionEntity s) {
+        if (s.getHistoryActionsJson() != null) {
+            try {
+                return objectMapper.readValue(s.getHistoryActionsJson(), new TypeReference<List<String>>() {});
+            } catch (Exception ignored) {
+                // fall through to the slow path
+            }
+        }
+        List<String> out = new ArrayList<>();
+        for (HistoryState h : deserializeHistory(s.getHistoryJson())) {
+            out.add(h.getActionDescription());
+        }
+        return out;
     }
 
     private List<HistoryState> deserializeHistory(String historyJson) {
@@ -257,22 +368,19 @@ public class WorkbookSessionHolder {
         if (userId == null) {
             throw new AccessDeniedException("Authentication required to register workbooks");
         }
-        synchronized (getLock(userId)) {
+        lockUser(userId);
+        {
             String fileId = UUID.randomUUID().toString();
 
-            List<WorkingSessionEntity> existing = workingSessionRepository.findByUserIdOrderByCreatedAtAsc(userId);
-            if (existing.size() >= MAX_WORKBOOKS_PER_USER) {
-                WorkingSessionEntity oldest = existing.get(0);
-                workingSessionRepository.delete(oldest);
-                existing.remove(0);
+            List<WorkingSessionRepository.SessionMetadataView> existing = workingSessionRepository.findMetadataByUserIdOrderByCreatedAtAsc(userId);
+            int toEvict = existing.size() - MAX_WORKBOOKS_PER_USER + 1;
+            for (int i = 0; i < toEvict; i++) {
+                String evictId = existing.get(i).getFileId();
+                workingSessionRepository.deleteByUserIdAndFileId(userId, evictId);
+                workbookCache.remove(evictId);
+                summaryCache.remove(evictId);
             }
-
-            for (WorkingSessionEntity s : existing) {
-                if (Boolean.TRUE.equals(s.getIsActive())) {
-                    s.setIsActive(false);
-                    workingSessionRepository.save(s);
-                }
-            }
+            workingSessionRepository.deactivateAllForUser(userId);
 
             List<HistoryState> history = new ArrayList<>();
             int currentIndex = -1;
@@ -284,6 +392,12 @@ public class WorkbookSessionHolder {
                 workbookJson = serializeWorkbook(workbook);
             }
 
+            long incomingChars = (long) workbookJson.length() * 2L;
+            Long usedChars = workingSessionRepository.sumStoredChars(userId);
+            if (usedChars != null && usedChars + incomingChars > MAX_STORED_CHARS_PER_USER) {
+                throw new InvalidRequestException("Storage limit reached. Please delete some workbooks and try again.");
+            }
+
             WorkingSessionEntity session = WorkingSessionEntity.builder()
                     .id(fileId)
                     .userId(userId)
@@ -293,6 +407,9 @@ public class WorkbookSessionHolder {
                     .isActive(true)
                     .workbookDataJson(workbookJson)
                     .historyJson(serializeHistory(history))
+                    .historySize(history.size())
+                    .historyActionsJson(actionsJson(history))
+                    .summaryJson(summaryJsonOf(workbook))
                     .currentIndex(currentIndex)
                     .createdAt(LocalDateTime.now())
                     .lastAccessed(LocalDateTime.now())
@@ -300,9 +417,7 @@ public class WorkbookSessionHolder {
 
             session = workingSessionRepository.save(session);
             if (workbook != null) {
-                CachedWorkbook cw = new CachedWorkbook(session.getVersion(), currentIndex, workbook);
-                workbookCache.put(fileId, cw);
-                summaryCache.put(fileId, new CachedSummary(session.getVersion(), currentIndex, cw.sheetCount, cw.totalRows, cw.sheetNames));
+                cacheAfterCommit(session, currentIndex, workbook);
             }
             return fileId;
         }
@@ -330,6 +445,12 @@ public class WorkbookSessionHolder {
             Long version = session.getVersion();
             Integer currentIndex = session.getCurrentIndex();
             CachedWorkbook cached = workbookCache.get(fileId);
+            if (cached == null && summaryCache.get(fileId) == null) {
+                CachedSummary fromDb = summaryFromJson(session.getSummaryJson(), version, currentIndex);
+                if (fromDb != null) {
+                    summaryCache.put(fileId, fromDb);
+                }
+            }
 
             int sheetCount;
             int totalRows;
@@ -388,11 +509,13 @@ public class WorkbookSessionHolder {
         return result;
     }
 
+    @Transactional
     public Map<String, Object> selectAndGetStatus(String fileId) {
         if (fileId == null) return null;
         Long userId = getCurrentUserId();
         if (userId == null) return null;
-        synchronized (getLock(userId)) {
+        lockUser(userId);
+        {
             Optional<WorkingSessionEntity> targetOpt = workingSessionRepository.findByUserIdAndFileId(userId, fileId);
             if (targetOpt.isEmpty()) {
                 return null;
@@ -404,11 +527,13 @@ public class WorkbookSessionHolder {
         }
     }
 
+    @Transactional
     public boolean setActiveWorkbook(String fileId) {
         if (fileId == null) return false;
         Long userId = getCurrentUserId();
         if (userId == null) return false;
-        synchronized (getLock(userId)) {
+        lockUser(userId);
+        {
             if (!workingSessionRepository.existsByUserIdAndFileId(userId, fileId)) {
                 return false;
             }
@@ -428,6 +553,8 @@ public class WorkbookSessionHolder {
             emptyResp.put("files", Collections.emptyList());
             return emptyResp;
         }
+        LocalDateTime touchNow = LocalDateTime.now();
+        workingSessionRepository.touchLastAccessed(userId, touchNow, touchNow.minusMinutes(10));
         Optional<WorkingSessionEntity> active = getActiveSession(userId);
         if (active.isEmpty()) {
             Map<String, Object> emptyResp = new LinkedHashMap<>();
@@ -456,15 +583,15 @@ public class WorkbookSessionHolder {
             }
         }
 
-        List<HistoryState> history = deserializeHistory(session.getHistoryJson());
+        List<String> history = actionsOf(session);
         int currentIndex = session.getCurrentIndex() != null ? session.getCurrentIndex() : -1;
         boolean canUndo = currentIndex > 0;
         boolean canRedo = currentIndex >= 0 && currentIndex < history.size() - 1;
         String undoAction = (canUndo && currentIndex < history.size())
-                ? history.get(currentIndex).getActionDescription()
+                ? history.get(currentIndex)
                 : "";
         String redoAction = (canRedo && currentIndex + 1 < history.size())
-                ? history.get(currentIndex + 1).getActionDescription()
+                ? history.get(currentIndex + 1)
                 : "";
 
         Map<String, Object> previewMap = null;
@@ -497,11 +624,13 @@ public class WorkbookSessionHolder {
         return response;
     }
 
+    @Transactional
     public boolean deleteWorkbook(String fileId) {
         if (fileId == null) return false;
         Long userId = getCurrentUserId();
         if (userId == null) return false;
-        synchronized (getLock(userId)) {
+        lockUser(userId);
+        {
             Optional<WorkingSessionEntity> targetOpt = workingSessionRepository.findByUserIdAndFileId(userId, fileId);
             if (targetOpt.isEmpty()) {
                 return false;
@@ -583,7 +712,8 @@ public class WorkbookSessionHolder {
         if (userId == null) {
             throw new AccessDeniedException("Authentication required to modify workbook");
         }
-        synchronized (getLock(userId)) {
+        lockUser(userId);
+        {
             Optional<WorkingSessionEntity> sessionOpt = getActiveSession(userId);
             if (sessionOpt.isPresent()) {
                 pushStateToSession(sessionOpt.get(), workbook, actionDescription);
@@ -605,7 +735,8 @@ public class WorkbookSessionHolder {
         if (userId == null) {
             throw new AccessDeniedException("Authentication required to modify workbook");
         }
-        synchronized (getLock(userId)) {
+        lockUser(userId);
+        {
             Optional<WorkingSessionEntity> sessionOpt = getActiveSession(userId);
             if (sessionOpt.isEmpty()) {
                 String fileName = workbook.getFileName() != null ? workbook.getFileName() : "Active Workbook";
@@ -638,6 +769,9 @@ public class WorkbookSessionHolder {
         session.setCurrentIndex(currentIndex);
         session.setWorkbookDataJson(serializeWorkbook(workbook));
         session.setHistoryJson(serializeHistory(history));
+        session.setHistorySize(history.size());
+        session.setHistoryActionsJson(actionsJson(history));
+        session.setSummaryJson(summaryJsonOf(workbook));
         if (session.getFileName() == null || session.getFileName().isBlank() || "Workbook".equals(session.getFileName())) {
             if (workbook.getFileName() != null && !workbook.getFileName().isBlank()) {
                 session.setFileName(workbook.getFileName());
@@ -645,9 +779,7 @@ public class WorkbookSessionHolder {
         }
         session.setLastAccessed(LocalDateTime.now());
         session = workingSessionRepository.save(session);
-        CachedWorkbook cw = new CachedWorkbook(session.getVersion(), currentIndex, workbook);
-        workbookCache.put(session.getFileId(), cw);
-        summaryCache.put(session.getFileId(), new CachedSummary(session.getVersion(), currentIndex, cw.sheetCount, cw.totalRows, cw.sheetNames));
+        cacheAfterCommit(session, currentIndex, workbook);
     }
 
     @Transactional(readOnly = true)
@@ -674,8 +806,7 @@ public class WorkbookSessionHolder {
         return getActiveSession(userId)
                 .map(s -> {
                     if (s.getCurrentIndex() == null || s.getCurrentIndex() < 0) return false;
-                    List<HistoryState> h = deserializeHistory(s.getHistoryJson());
-                    return s.getCurrentIndex() < h.size() - 1;
+                    return s.getCurrentIndex() < historySizeOf(s) - 1;
                 })
                 .orElse(false);
     }
@@ -685,7 +816,8 @@ public class WorkbookSessionHolder {
         if (!canUndo()) return null;
         Long userId = getCurrentUserId();
         if (userId == null) return null;
-        synchronized (getLock(userId)) {
+        lockUser(userId);
+        {
             WorkingSessionEntity session = getActiveSession(userId).orElse(null);
             if (session == null) return null;
 
@@ -696,11 +828,10 @@ public class WorkbookSessionHolder {
             HistoryState targetState = history.get(newIndex);
             session.setCurrentIndex(newIndex);
             session.setWorkbookDataJson(serializeWorkbook(targetState.getWorkbook()));
+            session.setSummaryJson(summaryJsonOf(targetState.getWorkbook()));
             session.setLastAccessed(LocalDateTime.now());
             session = workingSessionRepository.save(session);
-            CachedWorkbook cwRestored = new CachedWorkbook(session.getVersion(), newIndex, targetState.getWorkbook());
-            workbookCache.put(session.getFileId(), cwRestored);
-            summaryCache.put(session.getFileId(), new CachedSummary(session.getVersion(), newIndex, cwRestored.sheetCount, cwRestored.totalRows, cwRestored.sheetNames));
+            cacheAfterCommit(session, newIndex, targetState.getWorkbook());
             return targetState;
         }
     }
@@ -710,7 +841,8 @@ public class WorkbookSessionHolder {
         if (!canRedo()) return null;
         Long userId = getCurrentUserId();
         if (userId == null) return null;
-        synchronized (getLock(userId)) {
+        lockUser(userId);
+        {
             WorkingSessionEntity session = getActiveSession(userId).orElse(null);
             if (session == null) return null;
 
@@ -721,11 +853,10 @@ public class WorkbookSessionHolder {
             HistoryState targetState = history.get(newIndex);
             session.setCurrentIndex(newIndex);
             session.setWorkbookDataJson(serializeWorkbook(targetState.getWorkbook()));
+            session.setSummaryJson(summaryJsonOf(targetState.getWorkbook()));
             session.setLastAccessed(LocalDateTime.now());
             session = workingSessionRepository.save(session);
-            CachedWorkbook cwRestored = new CachedWorkbook(session.getVersion(), newIndex, targetState.getWorkbook());
-            workbookCache.put(session.getFileId(), cwRestored);
-            summaryCache.put(session.getFileId(), new CachedSummary(session.getVersion(), newIndex, cwRestored.sheetCount, cwRestored.totalRows, cwRestored.sheetNames));
+            cacheAfterCommit(session, newIndex, targetState.getWorkbook());
             return targetState;
         }
     }
@@ -737,9 +868,9 @@ public class WorkbookSessionHolder {
         if (userId == null) return null;
         return getActiveSession(userId)
                 .map(s -> {
-                    List<HistoryState> h = deserializeHistory(s.getHistoryJson());
+                    List<String> h = actionsOf(s);
                     int idx = s.getCurrentIndex();
-                    return (idx >= 0 && idx < h.size()) ? h.get(idx).getActionDescription() : null;
+                    return (idx >= 0 && idx < h.size()) ? h.get(idx) : null;
                 })
                 .orElse(null);
     }
@@ -751,9 +882,9 @@ public class WorkbookSessionHolder {
         if (userId == null) return null;
         return getActiveSession(userId)
                 .map(s -> {
-                    List<HistoryState> h = deserializeHistory(s.getHistoryJson());
+                    List<String> h = actionsOf(s);
                     int idx = s.getCurrentIndex() + 1;
-                    return (idx >= 0 && idx < h.size()) ? h.get(idx).getActionDescription() : null;
+                    return (idx >= 0 && idx < h.size()) ? h.get(idx) : null;
                 })
                 .orElse(null);
     }
@@ -772,7 +903,7 @@ public class WorkbookSessionHolder {
         Long userId = getCurrentUserId();
         if (userId == null) return 0;
         return getActiveSession(userId)
-                .map(s -> deserializeHistory(s.getHistoryJson()).size())
+                .map(this::historySizeOf)
                 .orElse(0);
     }
 
@@ -786,11 +917,11 @@ public class WorkbookSessionHolder {
         if (userId == null) return Collections.emptyList();
         return getActiveSession(userId)
                 .map(s -> {
-                    List<HistoryState> history = deserializeHistory(s.getHistoryJson());
+                    List<String> history = actionsOf(s);
                     int currentIndex = s.getCurrentIndex() != null ? s.getCurrentIndex() : -1;
                     List<String> list = new ArrayList<>();
                     for (int i = 0; i < history.size(); i++) {
-                        list.add(history.get(i).getActionDescription() + (i == currentIndex ? " (Active)" : ""));
+                        list.add(history.get(i) + (i == currentIndex ? " (Active)" : ""));
                     }
                     return list;
                 })
@@ -805,13 +936,17 @@ public class WorkbookSessionHolder {
     @Transactional
     public void clearForUser(Long userId) {
         if (userId == null) return;
-        synchronized (getLock(userId)) {
+        lockUser(userId);
+        {
             Optional<WorkingSessionEntity> sessionOpt = getActiveSession(userId);
             if (sessionOpt.isPresent()) {
                 WorkingSessionEntity s = sessionOpt.get();
                 workbookCache.remove(s.getFileId());
                 summaryCache.remove(s.getFileId());
                 s.setHistoryJson("[]");
+                s.setHistorySize(0);
+                s.setHistoryActionsJson("[]");
+                s.setSummaryJson(null);
                 s.setCurrentIndex(-1);
                 s.setWorkbookDataJson("{}");
                 s.setLastAccessed(LocalDateTime.now());
@@ -832,7 +967,8 @@ public class WorkbookSessionHolder {
         if (userId == null) {
             throw new AccessDeniedException("User ID must not be null");
         }
-        synchronized (getLock(userId)) {
+        lockUser(userId);
+        {
             if (workbook == null) {
                 workingSessionRepository.deleteAllByUserId(userId);
                 workbookCache.clear();
@@ -859,7 +995,7 @@ public class WorkbookSessionHolder {
     @Scheduled(fixedRate = 1800000)
     @Transactional
     public void cleanupInactiveSessions() {
-        LocalDateTime cutoff = LocalDateTime.now().minusHours(2);
+        LocalDateTime cutoff = LocalDateTime.now().minusSeconds(SESSION_TTL_MILLIS / 1000);
         try {
             workingSessionRepository.deleteByLastAccessedBefore(cutoff);
             workbookCache.clear();

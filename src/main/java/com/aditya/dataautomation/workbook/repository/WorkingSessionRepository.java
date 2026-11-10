@@ -25,12 +25,13 @@ public interface WorkingSessionRepository extends JpaRepository<WorkingSessionEn
         Integer getCurrentIndex();
         Long getVersion();
         Long getUserId();
+        String getSummaryJson();
     }
 
-    @Query("SELECT s.fileId AS fileId, s.fileName AS fileName, s.fileSize AS fileSize, s.isActive AS isActive, s.createdAt AS createdAt, s.lastAccessed AS lastAccessed, s.currentIndex AS currentIndex, s.version AS version, s.userId AS userId FROM WorkingSessionEntity s ORDER BY s.lastAccessed DESC")
+    @Query("SELECT s.fileId AS fileId, s.fileName AS fileName, s.fileSize AS fileSize, s.isActive AS isActive, s.createdAt AS createdAt, s.lastAccessed AS lastAccessed, s.currentIndex AS currentIndex, s.version AS version, s.userId AS userId, s.summaryJson AS summaryJson FROM WorkingSessionEntity s ORDER BY s.lastAccessed DESC")
     List<SessionMetadataView> findAllMetadataOrderByLastAccessedDesc();
 
-    @Query("SELECT s.fileId AS fileId, s.fileName AS fileName, s.fileSize AS fileSize, s.isActive AS isActive, s.createdAt AS createdAt, s.lastAccessed AS lastAccessed, s.currentIndex AS currentIndex, s.version AS version FROM WorkingSessionEntity s WHERE s.userId = :userId ORDER BY s.createdAt ASC")
+    @Query("SELECT s.fileId AS fileId, s.fileName AS fileName, s.fileSize AS fileSize, s.isActive AS isActive, s.createdAt AS createdAt, s.lastAccessed AS lastAccessed, s.currentIndex AS currentIndex, s.version AS version, s.summaryJson AS summaryJson FROM WorkingSessionEntity s WHERE s.userId = :userId ORDER BY s.createdAt ASC")
     List<SessionMetadataView> findMetadataByUserIdOrderByCreatedAtAsc(@Param("userId") Long userId);
 
     @Modifying
@@ -50,6 +51,11 @@ public interface WorkingSessionRepository extends JpaRepository<WorkingSessionEn
 
     Optional<WorkingSessionEntity> findByUserIdAndIsActiveTrue(Long userId);
 
+    /** Duplicate-safe: never throws IncorrectResultSizeDataAccessException even if two rows are flagged active. */
+    Optional<WorkingSessionEntity> findFirstByUserIdAndIsActiveTrueOrderByLastAccessedDesc(Long userId);
+
+    Optional<WorkingSessionEntity> findFirstByUserIdOrderByCreatedAtDesc(Long userId);
+
     Optional<WorkingSessionEntity> findByUserIdAndFileId(Long userId, String fileId);
 
     List<WorkingSessionEntity> findByUserId(Long userId);
@@ -58,15 +64,28 @@ public interface WorkingSessionRepository extends JpaRepository<WorkingSessionEn
 
     boolean existsByUserIdAndFileId(Long userId, String fileId);
 
-    @Modifying
+    @Modifying(flushAutomatically = true)
     @Transactional
-    void deleteByLastAccessedBefore(LocalDateTime cutoff);
+    @Query("DELETE FROM WorkingSessionEntity s WHERE s.lastAccessed < :cutoff")
+    int deleteByLastAccessedBefore(@Param("cutoff") LocalDateTime cutoff);
 
-    @Modifying
+    @Modifying(flushAutomatically = true)
     @Transactional
-    void deleteByUserIdAndFileId(Long userId, String fileId);
+    @Query("DELETE FROM WorkingSessionEntity s WHERE s.userId = :userId AND s.fileId = :fileId")
+    int deleteByUserIdAndFileId(@Param("userId") Long userId, @Param("fileId") String fileId);
 
+    @Modifying(flushAutomatically = true)
+    @Transactional
+    @Query("DELETE FROM WorkingSessionEntity s WHERE s.userId = :userId")
+    int deleteAllByUserId(@Param("userId") Long userId);
+
+    /** Marks the active session as recently used (at most once per threshold) so read-only users are not expired. */
     @Modifying
     @Transactional
-    void deleteAllByUserId(Long userId);
+    @Query("UPDATE WorkingSessionEntity s SET s.lastAccessed = :now WHERE s.userId = :userId AND s.isActive = true AND s.lastAccessed < :threshold")
+    int touchLastAccessed(@Param("userId") Long userId, @Param("now") LocalDateTime now, @Param("threshold") LocalDateTime threshold);
+
+    /** Approximate stored size (characters) of all sessions of a user: current workbook + undo history. */
+    @Query("SELECT COALESCE(SUM(LENGTH(s.workbookDataJson) + COALESCE(LENGTH(s.historyJson), 0)), 0) FROM WorkingSessionEntity s WHERE s.userId = :userId")
+    Long sumStoredChars(@Param("userId") Long userId);
 }

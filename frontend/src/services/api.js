@@ -1,24 +1,109 @@
 import axios from 'axios';
 
-const api = axios.create({ baseURL: '/api/v1' });
+const api = axios.create({ baseURL: '/api/v1', withCredentials: true, timeout: 30000 });
+
+let isRefreshing = false;
+let failedQueue = [];
+
+const processQueue = (error, token = null) => {
+  failedQueue.forEach(prom => {
+    if (error) {
+      prom.reject(error);
+    } else {
+      prom.resolve(token);
+    }
+  });
+  failedQueue = [];
+};
+
+const IDEMPOTENT_POSTS = ['/files/excel', '/jobs/excel-async', '/projects/save', '/support/ticket', '/ai/ask'];
 
 api.interceptors.request.use((config) => {
+  config.headers['X-Requested-With'] = 'XMLHttpRequest';
   const token = localStorage.getItem('tabufinery_token');
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
+  }
+  if (config.method === 'post' && IDEMPOTENT_POSTS.some((p) => config.url?.includes(p))
+      && !config.headers['Idempotency-Key']) {
+    config.headers['Idempotency-Key'] = crypto.randomUUID();
   }
   return config;
 }, (error) => Promise.reject(error));
 
 api.interceptors.response.use(
   (response) => response,
-  (error) => {
-    if (error.response?.status === 401) {
-      const url = error.config?.url || '';
-      if (!url.includes('/auth/login') && !url.includes('/auth/signup') && !url.includes('/auth/forgot') && !url.includes('/auth/reset') && !url.includes('/auth/verify-email')) {
-        clearStoredAuth();
-        window.dispatchEvent(new CustomEvent('tabufinery_unauthorized'));
+  async (error) => {
+    const originalRequest = error.config;
+    if (error.response?.status === 401 && originalRequest && !originalRequest._retry) {
+      const url = originalRequest.url || '';
+      const isAuthEndpoint = url.includes('/auth/login') ||
+                             url.includes('/auth/signup') ||
+                             url.includes('/auth/forgot') ||
+                             url.includes('/auth/reset') ||
+                             url.includes('/auth/verify-email') ||
+                             url.includes('/auth/refresh');
+
+      if (isAuthEndpoint) {
+        return Promise.reject(error);
       }
+
+      if (isRefreshing) {
+        return new Promise((resolve, reject) => {
+          failedQueue.push({ resolve, reject });
+        }).then((token) => {
+          originalRequest.headers.Authorization = `Bearer ${token}`;
+          return api(originalRequest);
+        }).catch((err) => Promise.reject(err));
+      }
+
+      originalRequest._retry = true;
+      isRefreshing = true;
+
+      try {
+        const refreshResponse = await axios.post('/api/v1/auth/refresh', null, {
+          withCredentials: true,
+          headers: { 'X-Requested-With': 'XMLHttpRequest' },
+          timeout: 10000
+        });
+        const newToken = refreshResponse.data?.token;
+        const newUser = refreshResponse.data?.user;
+
+        if (newToken) {
+          setStoredAuth(newToken, newUser);
+          processQueue(null, newToken);
+          originalRequest.headers.Authorization = `Bearer ${newToken}`;
+          return api(originalRequest);
+        } else {
+          throw new Error('Refresh did not return a valid token');
+        }
+      } catch (refreshErr) {
+        processQueue(refreshErr, null);
+        const status = refreshErr.response?.status;
+        if (status === 400 || status === 401 || status === 403) {
+          clearStoredAuth();
+          window.dispatchEvent(new CustomEvent('tabufinery_unauthorized'));
+        }
+        return Promise.reject(refreshErr);
+      } finally {
+        isRefreshing = false;
+      }
+    }
+    return Promise.reject(error);
+  }
+);
+
+api.interceptors.response.use(
+  (response) => response,
+  async (error) => {
+    if (axios.isCancel(error)) return Promise.reject(error);
+    const config = error.config;
+    const status = error.response?.status;
+    const transient = !error.response || status === 502 || status === 503 || status === 504;
+    if (config && config.method === 'get' && transient && (config._retryCount || 0) < 2) {
+      config._retryCount = (config._retryCount || 0) + 1;
+      await new Promise((r) => setTimeout(r, 500 * 3 ** (config._retryCount - 1)));
+      return api(config);
     }
     return Promise.reject(error);
   }
@@ -94,9 +179,22 @@ export const signupUser = (name, email, password, confirmPassword) =>
 export const loginUser = (email, password) =>
   api.post('/auth/login', { email, password });
 
-// token ko explicitly bhejte hain, kyunki clearStoredAuth() isse pehle storage saaf kar deta hai
+export const restoreSession = async () => {
+  try {
+    const res = await api.post('/auth/refresh');
+    if (res.data?.token) {
+      setStoredAuth(res.data.token, res.data.user);
+      return res.data;
+    }
+  } catch (_) {}
+  return null;
+};
+
 export const logoutUser = (token) =>
-  api.post('/auth/logout', null, { headers: token ? { Authorization: `Bearer ${token}` } : {} }).catch(() => {});
+  api.post('/auth/logout', null, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    withCredentials: true
+  }).catch(() => {});
 
 export const forgotPassword = (email) =>
   api.post('/auth/forgot-password', { email });
@@ -140,7 +238,8 @@ export const uploadExcel = (file) => {
   const form = new FormData();
   form.append('file', file);
   return api.post('/files/excel', form, {
-    headers: { 'Content-Type': 'multipart/form-data' }
+    headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: 120000
   });
 };
 
@@ -281,7 +380,8 @@ export const submitExcelAsync = (file) => {
   const form = new FormData();
   form.append('file', file);
   return api.post('/jobs/excel-async', form, {
-    headers: { 'Content-Type': 'multipart/form-data' }
+    headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: 120000
   });
 };
 

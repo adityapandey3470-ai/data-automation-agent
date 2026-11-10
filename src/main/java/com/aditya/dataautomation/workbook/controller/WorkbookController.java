@@ -54,7 +54,8 @@ public class WorkbookController {
         }
 
         List<Map<String, Object>> rows = sheet.getRows();
-        List<Map<String, Object>> preview = rows.subList(0, Math.min(limit, rows.size()));
+        int safeLimit = Math.max(1, Math.min(limit, 1000));
+        List<Map<String, Object>> preview = rows.subList(0, Math.min(safeLimit, rows.size()));
 
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("sheetName", sheet.getSheetName());
@@ -67,7 +68,10 @@ public class WorkbookController {
 
     @GetMapping("/data")
     @Operation(summary = "Get all data from a sheet")
-    public ResponseEntity<Map<String, Object>> getAllData(@RequestParam String sheetName) {
+    public ResponseEntity<Map<String, Object>> getAllData(
+            @RequestParam String sheetName,
+            @RequestParam(defaultValue = "0") int offset,
+            @RequestParam(defaultValue = "100000") int limit) {
         ExcelWorkbookData workbook = workbookSessionHolder.get();
         if (workbook == null) {
             return ResponseEntity.badRequest().body(Map.of("error", "No workbook loaded"));
@@ -80,8 +84,14 @@ public class WorkbookController {
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("sheetName", sheet.getSheetName());
         result.put("headers", sheet.getHeaders());
+        List<Map<String, Object>> all = sheet.getRows() != null ? sheet.getRows() : List.of();
+        int from = Math.max(0, Math.min(offset, all.size()));
+        int to = Math.min(all.size(), from + Math.max(1, Math.min(limit, 100000)));
         result.put("totalRows", sheet.getRowCount());
-        result.put("rows", sheet.getRows());
+        result.put("offset", from);
+        result.put("returnedRows", to - from);
+        result.put("truncated", to < all.size());
+        result.put("rows", all.subList(from, to));
         return ResponseEntity.ok(result);
     }
 

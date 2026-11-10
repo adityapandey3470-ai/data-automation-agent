@@ -278,8 +278,9 @@
   padding: 60px 20px;
   color: var(--text-secondary, #64748b);
   background: var(--card-bg, #ffffff);
-  border: 1px dashed var(--border, #cbd5e1);
+  border: 1px solid var(--border, #e2e8f0);
   border-radius: 12px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
 }
 
 .collab-empty-state h3 {
@@ -975,4 +976,322 @@
 @keyframes spin {
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }
+}
+
+/* ==========================================================================
+   Dark Theme Rules for Collaboration Page
+   ========================================================================== */
+
+[data-theme="dark"] .collab-container {
+  color: var(--text-primary, #f3f4f6);
+}
+
+[data-theme="dark"] .collab-header {
+  border-bottom-color: var(--border, #232a30);
+}
+
+[data-theme="dark"] .collab-title {
+  color: var(--text-primary, #f3f4f6);
+}
+
+[data-theme="dark"] .collab-subtitle {
+  color: var(--text-secondary, #9ca3af);
+}
+
+[data-theme="dark"] .collab-sync-bar {
+  background: var(--card-bg, #121619);
+  border-color: var(--border, #232a30);
+  box-shadow: none;
+}
+
+[data-theme="dark"] .collab-live-pill {
+  color: var(--text-primary, #f3f4f6);
+}
+
+[data-theme="dark"] .collab-icon-btn {
+  color: var(--text-secondary, #9ca3af);
+}
+
+[data-theme="dark"] .collab-icon-btn:hover {
+  background: var(--surface-hover, #1c2227);
+  color: var(--text-primary, #f3f4f6);
+}
+
+[data-theme="dark"] .collab-tabs {
+  border-bottom-color: var(--border, #232a30);
+}
+
+[data-theme="dark"] .collab-tab-btn {
+  color: var(--text-secondary, #9ca3af);
+}
+
+[data-theme="dark"] .collab-tab-btn:hover {
+  color: var(--text-primary, #f3f4f6);
+}
+
+[data-theme="dark"] .collab-tab-btn.active {
+  color: #10b981;
+  border-bottom-color: #10b981;
+}
+
+[data-theme="dark"] .collab-empty-state {
+  background: var(--card-bg, #121619);
+  border-color: var(--border, #232a30);
+  color: var(--text-secondary, #9ca3af);
+  box-shadow: none;
+}
+
+[data-theme="dark"] .collab-empty-state h3 {
+  color: var(--text-primary, #f3f4f6);
+}
+
+[data-theme="dark"] .collab-card {
+  background: var(--card-bg, #121619);
+  border-color: var(--border, #232a30);
+  box-shadow: none;
+}
+
+[data-theme="dark"] .collab-card:hover {
+  border-color: #10b981;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+}
+
+[data-theme="dark"] .collab-card-title {
+  color: var(--text-primary, #f3f4f6);
+}
+
+[data-theme="dark"] .collab-card-owner {
+  color: var(--text-secondary, #9ca3af);
+}
+
+[data-theme="dark"] .collab-card-owner strong {
+  color: var(--text-primary, #f3f4f6);
+}
+
+[data-theme="dark"] .collab-meta-row {
+  background: var(--surface-secondary, #161b1e);
+  border-color: var(--border, #232a30);
+}
+
+[data-theme="dark"] .collab-card-perms {
+  border-color: var(--border, #232a30);
+}
+
+[data-theme="dark"] .collab-perm-item {
+  color: var(--text-secondary, #9ca3af);
+}
+
+[data-theme="dark"] .collab-perm-item.active {
+  color: #34d399;
+}
+
+[data-theme="dark"] .collab-table-wrap {
+  background: var(--card-bg, #121619);
+  border-color: var(--border, #232a30);
+  box-shadow: none;
+}
+
+[data-theme="dark"] .collab-table th {
+  background: var(--table-header-bg, #161b1e);
+  color: var(--text-secondary, #9ca3af);
+  border-color: var(--border, #232a30);
+}
+
+[data-theme="dark"] .collab-table td {
+  border-color: var(--border, #232a30);
+  color: var(--text-primary, #f3f4f6);
+}
+
+[data-theme="dark"] .collab-table tr:hover td {
+  background: var(--surface-hover, #1c2227);
+}
+
+[data-theme="dark"] .collab-btn.secondary {
+  background: var(--card-bg, #121619);
+  border-color: var(--border, #232a30);
+  color: var(--text-primary, #f3f4f6);
+}
+
+[data-theme="dark"] .collab-btn.secondary:hover:not(:disabled) {
+  background: var(--surface-hover, #1c2227);
+  border-color: var(--border-light, #2a333c);
+  color: #ffffff;
+}
+
+[data-theme="dark"] .collab-btn-cancel {
+  background: var(--card-bg, #121619);
+  border-color: var(--border, #232a30);
+  color: var(--text-secondary, #9ca3af);
+}
+
+[data-theme="dark"] .collab-btn-cancel:hover {
+  background: var(--surface-hover, #1c2227);
+  color: var(--text-primary, #f3f4f6);
+}
+
+[data-theme="dark"] .collab-action-btn {
+  background: var(--surface-secondary, #161b1e);
+  border-color: var(--border, #232a30);
+  color: var(--text-secondary, #9ca3af);
+}
+
+[data-theme="dark"] .collab-action-btn:hover {
+  background: var(--surface-hover, #1c2227);
+  color: var(--text-primary, #f3f4f6);
+}
+
+[data-theme="dark"] .collab-action-btn.danger {
+  background: rgba(239, 68, 68, 0.12);
+  border-color: rgba(239, 68, 68, 0.25);
+  color: #f87171;
+}
+
+[data-theme="dark"] .collab-action-btn.danger:hover {
+  background: rgba(239, 68, 68, 0.2);
+}
+
+[data-theme="dark"] .collab-modal-overlay {
+  background: rgba(0, 0, 0, 0.7);
+}
+
+[data-theme="dark"] .collab-modal {
+  background: var(--modal-bg, #121619);
+  border-color: var(--border, #232a30);
+  box-shadow: 0 20px 45px -10px rgba(0, 0, 0, 0.6);
+}
+
+[data-theme="dark"] .collab-modal-header {
+  background: var(--modal-bg, #121619);
+  border-bottom-color: var(--border, #232a30);
+}
+
+[data-theme="dark"] .collab-modal-title h2 {
+  color: var(--text-primary, #f3f4f6);
+}
+
+[data-theme="dark"] .collab-modal-sub {
+  color: var(--text-secondary, #9ca3af);
+}
+
+[data-theme="dark"] .collab-modal-close {
+  border-color: var(--border, #232a30);
+  color: var(--text-secondary, #9ca3af);
+}
+
+[data-theme="dark"] .collab-modal-close:hover {
+  background: var(--surface-hover, #1c2227);
+  color: var(--text-primary, #f3f4f6);
+}
+
+[data-theme="dark"] .collab-modal-body {
+  background: var(--modal-bg, #121619);
+}
+
+[data-theme="dark"] .collab-field-label {
+  color: var(--text-primary, #f3f4f6);
+}
+
+[data-theme="dark"] .collab-input {
+  background: var(--input-bg, #0d1012);
+  border-color: var(--border, #232a30);
+  color: var(--text-primary, #f3f4f6);
+}
+
+[data-theme="dark"] .collab-input:focus {
+  border-color: #10b981;
+}
+
+[data-theme="dark"] .collab-perm-section-label {
+  color: var(--text-secondary, #9ca3af);
+}
+
+[data-theme="dark"] .collab-perm-toggle-card {
+  background: var(--surface-secondary, #161b1e);
+  border-color: var(--border, #232a30);
+}
+
+[data-theme="dark"] .collab-perm-toggle-card:hover {
+  background: var(--surface-hover, #1c2227);
+}
+
+[data-theme="dark"] .collab-perm-toggle-card.is-active {
+  background: rgba(16, 185, 129, 0.12);
+  border-color: #10b981;
+}
+
+[data-theme="dark"] .collab-perm-name {
+  color: var(--text-primary, #f3f4f6);
+}
+
+[data-theme="dark"] .collab-perm-desc {
+  color: var(--text-secondary, #9ca3af);
+}
+
+[data-theme="dark"] .collab-custom-checkbox {
+  background: var(--surface, #121619);
+  border-color: var(--border, #232a30);
+}
+
+[data-theme="dark"] .collab-modal-footer {
+  background: var(--surface-secondary, #161b1e);
+  border-top-color: var(--border, #232a30);
+}
+
+[data-theme="dark"] .collab-auth-notice {
+  background: var(--card-bg, #121619);
+  border-color: var(--border, #232a30);
+  box-shadow: none;
+}
+
+[data-theme="dark"] .collab-auth-notice h2 {
+  color: var(--text-primary, #f3f4f6);
+}
+
+[data-theme="dark"] .collab-auth-notice p {
+  color: var(--text-secondary, #9ca3af);
+}
+
+[data-theme="dark"] .collab-badge-beta,
+[data-theme="dark"] .collab-perm-pill.green,
+[data-theme="dark"] .collab-modal-icon-badge {
+  background: rgba(16, 185, 129, 0.15);
+  border-color: rgba(16, 185, 129, 0.3);
+  color: #34d399;
+}
+
+[data-theme="dark"] .collab-perm-pill.gray {
+  background: rgba(100, 116, 139, 0.2);
+  border-color: rgba(100, 116, 139, 0.3);
+  color: #94a3b8;
+}
+
+[data-theme="dark"] .collab-chip.green {
+  background: rgba(16, 185, 129, 0.15);
+  border-color: rgba(16, 185, 129, 0.3);
+  color: #34d399;
+}
+
+[data-theme="dark"] .collab-chip.gray {
+  background: rgba(100, 116, 139, 0.2);
+  border-color: rgba(100, 116, 139, 0.3);
+  color: #94a3b8;
+}
+
+[data-theme="dark"] .collab-info-notice {
+  background: rgba(16, 185, 129, 0.08);
+  border-color: rgba(16, 185, 129, 0.25);
+  color: #a7f3d0;
+}
+
+[data-theme="dark"] .collab-security-banner {
+  background: rgba(245, 158, 11, 0.08);
+  border-color: rgba(245, 158, 11, 0.25);
+}
+
+[data-theme="dark"] .collab-security-banner strong {
+  color: #fcd34d;
+}
+
+[data-theme="dark"] .collab-security-banner p {
+  color: #fde68a;
 }

@@ -13,6 +13,7 @@ import org.springframework.stereotype.Service;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import org.springframework.scheduling.annotation.Scheduled;
 
 @Slf4j
 @Service
@@ -121,6 +122,16 @@ public class SupportChatService {
             }
             timestamps.add(now);
             return timestamps;
+        });
+    }
+
+    /** Drops users whose last request is older than a minute, so the map cannot grow forever. */
+    @Scheduled(fixedRate = 300_000L)
+    public void evictIdleRateLimits() {
+        long cutoff = System.currentTimeMillis() - 60_000L;
+        rateLimits.entrySet().removeIf(e -> {
+            List<Long> ts = e.getValue();
+            return ts == null || ts.isEmpty() || ts.get(ts.size() - 1) < cutoff;
         });
     }
 

@@ -18,6 +18,10 @@ public interface EmailVerificationTokenRepository extends JpaRepository<EmailVer
     void deleteByUserId(Long userId);
 
     @Modifying
+    @Query("DELETE FROM EmailVerificationToken t WHERE t.expiresAt < :cutoff")
+    int deleteExpired(@Param("cutoff") LocalDateTime cutoff);
+
+    @Modifying
     @Query("UPDATE EmailVerificationToken t SET t.verified = true WHERE t.tokenHash = :tokenHash AND t.verified = false AND t.expiresAt > :now")
     int markVerificationTokenUsedAtomic(@Param("tokenHash") String tokenHash, @Param("now") LocalDateTime now);
 }

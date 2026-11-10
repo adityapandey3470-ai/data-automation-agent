@@ -14,7 +14,6 @@ public class CorsProperties {
 
     @NotEmpty(message = "Allowed CORS origins list must not be empty")
     private List<String> allowedOrigins = List.of(
-            "http://localhost:5173",
-            "http://192.168.29.46:5173"
+            "http://localhost:5173"
     );
 }

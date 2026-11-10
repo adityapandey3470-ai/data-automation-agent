@@ -23,11 +23,15 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.*;
 import java.util.stream.Collectors;
+import com.aditya.dataautomation.excel.dto.WorkbookSummaryDto;
+import java.time.LocalDateTime;
 
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class ProjectService {
+
+    private static final int MAX_PROJECTS_PER_USER = 100;
 
     private final ProjectRepository projectRepository;
     private final UserRepository userRepository;
@@ -37,9 +41,6 @@ public class ProjectService {
     @Transactional
     public ProjectSummaryDto saveCurrentProject(Long userId, SaveProjectRequest request) {
         ExcelWorkbookData workbook = workbookSessionHolder.getForUser(userId);
-        if (workbook == null) {
-            workbook = workbookSessionHolder.get();
-        }
         if (workbook == null) {
             throw new InvalidRequestException("No active workbook session to save. Please upload a file first.");
         }
@@ -52,6 +53,9 @@ public class ProjectService {
             project = projectRepository.findByIdAndUserId(request.getProjectId(), userId)
                     .orElseThrow(() -> new InvalidRequestException("Project not found or access denied"));
         } else {
+            if (projectRepository.countByUserId(userId) >= MAX_PROJECTS_PER_USER) {
+                throw new InvalidRequestException("Project limit reached (" + MAX_PROJECTS_PER_USER + "). Please delete an old project first.");
+            }
             project = new Project();
             project.setId(UUID.randomUUID().toString());
             project.setUser(user);
@@ -85,6 +89,13 @@ public class ProjectService {
             }
         }
 
+        for (WorkbookSummaryDto w : workbookSessionHolder.listWorkbooks(userId)) {
+            if (w.isActive()) {
+                project.setFileSizeBytes(w.getFileSize());
+                break;
+            }
+        }
+
         project.setSheetCount(sheetCount);
         project.setRowCount(rowCount);
         project.setColumnCount(columnCount);
@@ -106,7 +117,7 @@ public class ProjectService {
 
     @Transactional(readOnly = true)
     public List<ProjectSummaryDto> listUserProjects(Long userId) {
-        return projectRepository.findByUserIdOrderByUpdatedAtDesc(userId)
+        return projectRepository.findSummariesByUserId(userId)
                 .stream()
                 .map(this::toSummaryDto)
                 .collect(Collectors.toList());
@@ -114,9 +125,9 @@ public class ProjectService {
 
     @Transactional(readOnly = true)
     public ProjectSummaryDto getProject(Long userId, String projectId) {
-        Project project = projectRepository.findByIdAndUserId(projectId, userId)
+        return projectRepository.findSummaryByIdAndUserId(projectId, userId)
+                .map(this::toSummaryDto)
                 .orElseThrow(() -> new InvalidRequestException("Project not found or access denied"));
-        return toSummaryDto(project);
     }
 
     @Transactional
@@ -158,13 +169,12 @@ public class ProjectService {
 
     @Transactional
     public ProjectSummaryDto renameProject(Long userId, String projectId, RenameProjectRequest request) {
-        Project project = projectRepository.findByIdAndUserId(projectId, userId)
-                .orElseThrow(() -> new InvalidRequestException("Project not found or access denied"));
-
-        project.setName(request.getName().trim());
-        project = projectRepository.save(project);
-        log.info("Project renamed: id={}, newName={}, userId={}", project.getId(), project.getName(), userId);
-        return toSummaryDto(project);
+        int updated = projectRepository.renameByIdAndUserId(projectId, userId, request.getName().trim(), LocalDateTime.now());
+        if (updated == 0) {
+            throw new InvalidRequestException("Project not found or access denied");
+        }
+        log.info("Project renamed: id={}, userId={}", projectId, userId);
+        return getProject(userId, projectId);
     }
 
     @Transactional
@@ -174,6 +184,22 @@ public class ProjectService {
 
         projectRepository.delete(project);
         log.info("Project deleted: id={}, userId={}", projectId, userId);
+    }
+
+    public ProjectSummaryDto toSummaryDto(ProjectRepository.ProjectSummaryView p) {
+        return ProjectSummaryDto.builder()
+                .id(p.getId())
+                .name(p.getName())
+                .description(p.getDescription())
+                .fileName(p.getFileName())
+                .fileSizeBytes(p.getFileSizeBytes())
+                .rowCount(p.getRowCount())
+                .columnCount(p.getColumnCount())
+                .sheetCount(p.getSheetCount())
+                .activeSheetName(p.getActiveSheetName())
+                .createdAt(p.getCreatedAt())
+                .updatedAt(p.getUpdatedAt())
+                .build();
     }
 
     public ProjectSummaryDto toSummaryDto(Project p) {

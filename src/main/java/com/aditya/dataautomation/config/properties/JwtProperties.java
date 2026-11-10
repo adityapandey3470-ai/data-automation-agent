@@ -18,4 +18,7 @@ public class JwtProperties {
 
     @Min(value = 1, message = "JWT expiration hours must be at least 1")
     private int expirationHours = 72;
+
+    @Min(value = 1, message = "Access token lifetime must be at least 1 minute")
+    private int accessTokenMinutes = 15;
 }

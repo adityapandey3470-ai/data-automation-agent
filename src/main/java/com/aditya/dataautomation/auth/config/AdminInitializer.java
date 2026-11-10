@@ -30,7 +30,9 @@ public class AdminInitializer implements ApplicationRunner {
         String adminPassword = adminProperties.getPassword();
         String adminName = adminProperties.getName();
 
-        boolean isProduction = environment.acceptsProfiles(Profiles.of("prod", "production"));
+        // Fail-safe: anything that is not explicitly a dev/local/test profile is treated as production
+        boolean devMode = environment.acceptsProfiles(Profiles.of("dev", "local", "test"));
+        boolean isProduction = !devMode;
 
         if (adminEmail == null || adminEmail.isBlank() || adminPassword == null || adminPassword.isBlank()) {
             boolean hasAdmin = userRepository.existsByRole("ROLE_ADMIN");
@@ -42,6 +44,10 @@ public class AdminInitializer implements ApplicationRunner {
             }
             log.info("No initial admin credentials provided via APP_ADMIN_EMAIL / APP_ADMIN_PASSWORD. System running with existing accounts.");
             return;
+        }
+
+        if (isProduction && adminPassword.trim().length() < 12) {
+            throw new IllegalStateException("APP_ADMIN_PASSWORD must be at least 12 characters outside dev/local/test profiles.");
         }
 
         String email = adminEmail.trim().toLowerCase();

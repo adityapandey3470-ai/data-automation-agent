@@ -15,7 +15,8 @@ import OnboardingModal from './components/launch/OnboardingModal';
 import AuthModal from './components/auth/AuthModal';
 import SavedProjectsModal from './components/workspace/SavedProjectsModal';
 import ErrorBoundary from './components/shared/ErrorBoundary';
-import { getWorkbookStatus, selectWorkspaceFile, deleteWorkspaceFile, getStoredUser, clearStoredAuth, getCurrentUser, getStoredToken, logoutUser, setStoredAuth } from './services/api';
+import { getWorkbookStatus, selectWorkspaceFile, deleteWorkspaceFile, getStoredUser, clearStoredAuth, getCurrentUser, getStoredToken, logoutUser, setStoredAuth, restoreSession } from './services/api';
+import { dashboardWs } from './services/websocket';
 
 const VALID_PAGES = ['overview', 'workspace', 'assistant', 'analytics', 'export', 'collaboration', 'admin', 'settings'];
 
@@ -138,6 +139,16 @@ export default function App() {
           if (res?.data) {
             setCurrentUser(res.data);
             setStoredAuth(getStoredToken(), res.data);
+            dashboardWs.connect();
+          }
+        })
+        .catch(() => {});
+    } else {
+      restoreSession()
+        .then(res => {
+          if (res?.user) {
+            setCurrentUser(res.user);
+            dashboardWs.connect();
           }
         })
         .catch(() => {});
@@ -293,10 +304,12 @@ export default function App() {
   const handleAuthSuccess = (user) => {
     setCurrentUser(user);
     setShowAuthModal(false);
+    dashboardWs.connect();
   };
 
   const handleLogout = () => {
     logoutUser(getStoredToken());
+    dashboardWs.disconnect();
     clearStoredAuth();
     setCurrentUser(null);
     setFileInfo(null);

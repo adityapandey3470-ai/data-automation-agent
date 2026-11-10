@@ -44,9 +44,7 @@ public class SupportTicketService {
                 .userId(currentUser.getId())
                 .userEmail(currentUser.getEmail())
                 .userName(currentUser.getName())
-                .category(request.getCategory() != null && !request.getCategory().isBlank()
-                        ? request.getCategory().trim().toUpperCase()
-                        : "OTHER")
+                .category(normalizeCategory(request.getCategory()))
                 .subject(request.getSubject().trim())
                 .message(request.getMessage().trim())
                 .status("OPEN")
@@ -74,16 +72,20 @@ public class SupportTicketService {
         }
 
         String ticketCode = generateUniqueTicketCode("BUG-");
-        String severity = (request.getSeverity() != null && !request.getSeverity().isBlank())
+        String severity = (request.getSeverity() != null && java.util.Set.of("LOW", "MEDIUM", "HIGH", "CRITICAL")
+                .contains(request.getSeverity().trim().toUpperCase()))
                 ? request.getSeverity().trim().toUpperCase()
                 : "MEDIUM";
 
         Long userId = (currentUser != null) ? currentUser.getId() : 0L;
         String userEmail = (currentUser != null) ? currentUser.getEmail()
-                : (request.getUserEmail() != null && !request.getUserEmail().isBlank() ? request.getUserEmail().replaceAll("[\\r\\n]", "").trim() : "anonymous@tabufinery.io");
+                : (request.getUserEmail() != null && !request.getUserEmail().isBlank() ? safeGuestEmail(request.getUserEmail()) : "anonymous@tabufinery.io");
         String userName = (currentUser != null) ? currentUser.getName() : "Guest User";
 
         String desc = request.getDescription().trim();
+        if (desc.length() > 5000) {
+            desc = desc.substring(0, 5000);
+        }
         String oneLine = desc.replaceAll("[\\r\\n]+", " ");
         String subject = "Bug: " + (oneLine.length() > 60 ? oneLine.substring(0, 57) + "..." : oneLine);
 
@@ -108,7 +110,8 @@ public class SupportTicketService {
         ticket = ticketRepository.save(ticket);
 
         log.warn("🚨 [BUG REPORT RECEIVED] Code: {}, Severity: {}, Reported By: {} ({}) | Subject: {}\nSteps: {}",
-                ticketCode, severity, userName, userEmail, subject, request.getStepsToReproduce());
+                ticketCode, severity, sanitizeForLog(userName), sanitizeForLog(userEmail), sanitizeForLog(subject),
+                sanitizeForLog(request.getStepsToReproduce()));
 
         return TicketResponse.builder()
                 .ticketCode(ticketCode)
@@ -116,6 +119,31 @@ public class SupportTicketService {
                 .message("Bug report submitted successfully! Reference code: " + ticketCode + ". Our engineering team has been notified.")
                 .createdAt(ticket.getCreatedAt() != null ? ticket.getCreatedAt() : LocalDateTime.now())
                 .build();
+    }
+
+    private static String normalizeCategory(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return "OTHER";
+        }
+        String c = raw.trim().toUpperCase().replaceAll("[^A-Z0-9_]", "_");
+        return c.length() > 30 ? c.substring(0, 30) : c;
+    }
+
+    private static String safeGuestEmail(String raw) {
+        String e = raw.replaceAll("[\\r\\n]", "").trim();
+        if (e.length() > 254 || !e.matches("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$")) {
+            return "anonymous@tabufinery.io";
+        }
+        return e;
+    }
+
+    /** Strips control characters (CR/LF etc.) so user input cannot forge log lines. */
+    private static String sanitizeForLog(String s) {
+        if (s == null) {
+            return "";
+        }
+        String clean = s.replaceAll("[\\p{Cntrl}]", " ");
+        return clean.length() > 300 ? clean.substring(0, 300) + "..." : clean;
     }
 
     private String generateTicketCode() {

@@ -92,19 +92,7 @@ export default function AIAssistant({ sheetName, loaded, onRefresh, onNavigate, 
 
   const loadProfile = useCallback(async (forceRefresh = false) => {
     if (!loaded || !sheetName) return;
-    if (forceRefresh) {
-      try {
-        sessionStorage.removeItem(`tabufinery_profile_${sheetName}`);
-      } catch {}
-      setLoadingProfile(true);
-    } else {
-      try {
-        const cached = sessionStorage.getItem(`tabufinery_profile_${sheetName}`);
-        if (!cached) setLoadingProfile(true);
-      } catch {
-        setLoadingProfile(true);
-      }
-    }
+    setLoadingProfile(true);
     setProfileError(null);
     try {
       const [statusRes, profileRes] = await Promise.all([
@@ -299,7 +287,7 @@ export default function AIAssistant({ sheetName, loaded, onRefresh, onNavigate, 
             disabled={loadingProfile}
             title="Reload fresh data profile"
           >
-            <RefreshCw size={13} className={loadingProfile ? 'spin' : ''} /> Refresh Profile
+            <RefreshCw size={13} className={loadingProfile ? 'spin' : ''} /> {loadingProfile ? 'Refreshing Profile...' : 'Refresh Profile'}
           </button>
         </div>
       </div>
@@ -656,22 +644,28 @@ export default function AIAssistant({ sheetName, loaded, onRefresh, onNavigate, 
       )}
 
       {tab === 'insights' && (
-        <div className="automatic-insights-view">
-          {loadingProfile ? (
-            <div className="card p-24 text-center">
+        <div className="automatic-insights-view" style={{ minHeight: 400 }}>
+          {!profile && loadingProfile ? (
+            <div className="card p-24 text-center" style={{ minHeight: 320, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
               <div className="spinner mb-12" style={{ margin: '0 auto' }} />
               <h4>Analyzing Sheet Structure & Computing Distribution Metrics...</h4>
               <p className="text-secondary" style={{ fontSize: 13 }}>
                 Evaluating null rates, standard deviations, duplicates, and category distributions.
               </p>
             </div>
-          ) : profileError ? (
+          ) : profileError && !profile ? (
             <div className="alert alert-error mb-20">
               <AlertCircle size={16} />
               <span>{profileError}</span>
             </div>
           ) : profile ? (
-            <>
+            <div style={{ opacity: loadingProfile ? 0.75 : 1, transition: 'opacity 0.2s ease', pointerEvents: loadingProfile ? 'none' : 'auto' }}>
+              {profileError && (
+                <div className="alert alert-error mb-20">
+                  <AlertCircle size={16} />
+                  <span>{profileError}</span>
+                </div>
+              )}
               <div className="kpi-grid mb-20">
                 <div className="kpi-card">
                   <div className="kpi-value">{profile.totalRows.toLocaleString()}</div>
@@ -921,7 +915,7 @@ export default function AIAssistant({ sheetName, loaded, onRefresh, onNavigate, 
                   </div>
                 ))}
               </div>
-            </>
+            </div>
           ) : null}
         </div>
       )}

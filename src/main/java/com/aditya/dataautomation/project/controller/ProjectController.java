@@ -25,14 +25,17 @@ import java.util.Map;
 public class ProjectController {
 
     private final ProjectService projectService;
+    private final com.aditya.dataautomation.idempotency.IdempotencyService idempotencyService;
 
     @PostMapping("/save")
     @Operation(summary = "Save or update the current workbook as a project")
-    public ResponseEntity<ProjectSummaryDto> saveCurrentProject(
+    public ResponseEntity<?> saveCurrentProject(
             @AuthenticationPrincipal UserPrincipal principal,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
             @Valid @RequestBody SaveProjectRequest request) {
         if (principal == null) return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
-        ProjectSummaryDto summary = projectService.saveCurrentProject(principal.getId(), request);
+        Object summary = idempotencyService.execute(principal.getId(), "project-save", idempotencyKey,
+                () -> projectService.saveCurrentProject(principal.getId(), request));
         return ResponseEntity.ok(summary);
     }
 

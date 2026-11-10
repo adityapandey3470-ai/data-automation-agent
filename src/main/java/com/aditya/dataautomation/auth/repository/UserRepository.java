@@ -6,9 +6,22 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.stereotype.Repository;
 
 import java.util.Optional;
+import jakarta.persistence.LockModeType;
+import org.springframework.data.jpa.repository.Lock;
+import org.springframework.data.repository.query.Param;
 
 @Repository
 public interface UserRepository extends JpaRepository<User, Long> {
+
+    /** Takes a row lock on the user for the rest of the current transaction (cluster-wide per-user mutex). */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT u FROM User u WHERE u.id = :id")
+    Optional<User> findByIdForUpdate(@Param("id") Long id);
+
+    /** Locks every enabled admin row so two concurrent demote/disable/delete calls cannot both pass the "last admin" check. */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT u FROM User u WHERE u.role = 'ROLE_ADMIN' AND u.enabled = true ORDER BY u.id")
+    java.util.List<User> lockEnabledAdmins();
 
     Optional<User> findByEmailIgnoreCase(String email);
 

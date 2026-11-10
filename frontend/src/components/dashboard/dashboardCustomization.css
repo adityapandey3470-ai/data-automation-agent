@@ -31,6 +31,18 @@
   color: #ffffff !important;
 }
 
+[data-theme="dark"] .chart-dashboard-customized .card {
+  background: var(--card-bg, #121619) !important;
+  border: 1px solid var(--border, #232a30) !important;
+  color: var(--text-primary, #f3f4f6) !important;
+  box-shadow: none !important;
+}
+
+[data-theme="dark"] .chart-dashboard-customized .empty-icon-wrap {
+  background: var(--surface-secondary, #161b1e) !important;
+  border-color: var(--border, #232a30) !important;
+}
+
 .chart-dashboard-customized::before {
   content: '';
   position: absolute;

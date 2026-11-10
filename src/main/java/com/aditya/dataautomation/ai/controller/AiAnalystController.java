@@ -31,6 +31,7 @@ public class AiAnalystController {
     private final DataInsightsService insightsService;
     private final GeminiClientService geminiClient;
     private final WorkbookSessionHolder sessionHolder;
+    private final com.aditya.dataautomation.idempotency.IdempotencyService idempotencyService;
 
     @GetMapping("/status")
     @Operation(summary = "Check AI Engine status", description = "Returns whether Gemini AI is configured and ready")
@@ -72,10 +73,12 @@ public class AiAnalystController {
     @PostMapping("/ask")
     @Operation(summary = "Ask the AI Analyst a question",
             description = "Analyzes question with Gemini AI (or deterministic engine) using verified dataset profile")
-    public ResponseEntity<AiAnalystResponse> ask(
+    public ResponseEntity<?> ask(
             @AuthenticationPrincipal UserPrincipal principal,
+            @org.springframework.web.bind.annotation.RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
             @Valid @RequestBody AiAnalystRequest request) {
-        AiAnalystResponse response = analystService.ask(principal, request.getQuestion(), request.getSheetName());
+        Object response = idempotencyService.execute(principal != null ? principal.getId() : null, "ai-ask", idempotencyKey,
+                () -> analystService.ask(principal, request.getQuestion(), request.getSheetName()));
         return ResponseEntity.ok(response);
     }
 

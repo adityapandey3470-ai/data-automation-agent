@@ -13,6 +13,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.Collections;
 import java.util.List;
 import java.util.stream.Collectors;
+import org.springframework.transaction.annotation.Propagation;
 
 @Slf4j
 @Service
@@ -22,7 +23,7 @@ public class AiUsageService {
     private final AiUsageMetricRepository metricRepository;
     private final GeminiClientService geminiClient;
 
-    @Transactional
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void recordUsage(Long userId, String userEmail, String feature, String modelName,
                             int promptTokens, int completionTokens, long latencyMs,
                             String status, String queryPreview) {

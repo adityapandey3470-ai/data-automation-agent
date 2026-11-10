@@ -62,7 +62,7 @@ public class AiAnalystService {
         boolean isEnterprise = "ENTERPRISE".equals(tier);
         boolean needsQuotaTracking = !isAdmin && !isEnterprise;
 
-        int reserved = userRepository.reserveAiQueryQuota(user.getId());
+        int reserved = needsQuotaTracking ? userRepository.reserveAiQueryQuota(user.getId()) : 1;
         if (reserved == 0 && needsQuotaTracking) {
             throw new QuotaExceededException("You have reached your limit of " + limit + " AI queries for your " + tier + " plan. Please upgrade to Pro for higher limits.");
         }
@@ -86,8 +86,10 @@ public class AiAnalystService {
                     JsonNode aiResult = geminiClient.askAnalyst(question, profile, sample);
                     if (aiResult != null && aiResult.has("answer")) {
                         response = parseAiResult(aiResult, profile, startTime, question);
-                        promptTokens = Math.max(90, (question.length() + 850) / 4);
-                        completionTokens = Math.max(60, response.getAnswer().length() / 4);
+                        int realPrompt = aiResult.path("_promptTokens").asInt(0);
+                        int realCompletion = aiResult.path("_completionTokens").asInt(0);
+                        promptTokens = realPrompt > 0 ? realPrompt : Math.max(90, (question.length() + 850) / 4);
+                        completionTokens = realCompletion > 0 ? realCompletion : Math.max(60, response.getAnswer().length() / 4);
                     }
                 } catch (Exception e) {
                     log.warn("Gemini execution error, reverting to deterministic fallback: {}", e.getMessage());
@@ -196,7 +198,7 @@ public class AiAnalystService {
                 actions.add(AiSuggestedAction.builder()
                         .label(a.path("label").asText("Execute Action"))
                         .command(cmd)
-                        .requiresConfirmation(isDestructive || a.path("requiresConfirmation").asBoolean(true))
+                        .requiresConfirmation(true) // never trust the model to decide whether confirmation is needed
                         .build());
             }
         }

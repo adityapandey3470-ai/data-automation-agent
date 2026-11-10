@@ -8,7 +8,8 @@ import com.aditya.dataautomation.excel.dto.ExcelSheetResponse;
 import com.aditya.dataautomation.excel.exception.InvalidExcelFileException;
 import com.aditya.dataautomation.excel.model.ExcelSheetData;
 import com.aditya.dataautomation.excel.model.ExcelWorkbookData;
-
+import com.aditya.dataautomation.excel.util.XlsxPreflight;
+import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.poi.openxml4j.util.ZipSecureFile;
@@ -31,6 +32,8 @@ import java.util.*;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.Semaphore;
+import java.util.concurrent.TimeUnit;
 
 @Slf4j
 @Service
@@ -49,32 +52,49 @@ public class ExcelFileServiceImpl implements ExcelFileService {
 
     private final FileProperties fileProperties;
     private final ExcelProperties excelProperties;
+    private Semaphore parseSemaphore;
+
+    @PostConstruct
+    public void initSemaphore() {
+        int permits = Math.max(1, excelProperties.getMaxConcurrentParses());
+        this.parseSemaphore = new Semaphore(permits, true);
+    }
 
     @Override
     public ExcelFileResponse processExcelFile(MultipartFile file) {
         validateFile(file);
 
-        try (InputStream inputStream = file.getInputStream();
-             Workbook workbook = WorkbookFactory.create(inputStream)) {
-
-            List<ExcelSheetResponse> sheetResponses = new ArrayList<>();
-
-            for (int i = 0; i < workbook.getNumberOfSheets(); i++) {
-                Sheet sheet = workbook.getSheetAt(i);
-                sheetResponses.add(processSheet(sheet));
+        boolean acquired = false;
+        try {
+            acquired = parseSemaphore.tryAcquire(20, TimeUnit.SECONDS);
+            if (!acquired) {
+                throw new InvalidExcelFileException("Server is currently busy processing other Excel workbooks. Please retry in a few moments.");
             }
+            runPreflight(file);
 
-            return ExcelFileResponse.builder()
-                    .fileName(file.getOriginalFilename())
-                    .fileSize(file.getSize())
-                    .contentType(XLSX_CONTENT_TYPE)
-                    .sheetCount(workbook.getNumberOfSheets())
-                    .sheets(sheetResponses)
-                    .build();
+            try (InputStream inputStream = file.getInputStream();
+                 Workbook workbook = WorkbookFactory.create(inputStream)) {
 
+                List<ExcelSheetResponse> sheetResponses = new ArrayList<>();
+
+                for (int i = 0; i < workbook.getNumberOfSheets(); i++) {
+                    Sheet sheet = workbook.getSheetAt(i);
+                    sheetResponses.add(processSheet(sheet));
+                }
+
+                return ExcelFileResponse.builder()
+                        .fileName(file.getOriginalFilename())
+                        .fileSize(file.getSize())
+                        .contentType(XLSX_CONTENT_TYPE)
+                        .sheetCount(workbook.getNumberOfSheets())
+                        .sheets(sheetResponses)
+                        .build();
+            }
         } catch (InvalidExcelFileException e) {
-
             throw e;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new InvalidExcelFileException("File processing was interrupted.");
         } catch (IOException e) {
             log.error("Failed to read Excel file: {}", e.getMessage());
             throw new InvalidExcelFileException(
@@ -83,6 +103,10 @@ public class ExcelFileServiceImpl implements ExcelFileService {
             log.error("Unexpected error processing Excel file: {}", e.getMessage());
             throw new InvalidExcelFileException(
                     "The uploaded file could not be processed as a valid Excel workbook.", e);
+        } finally {
+            if (acquired) {
+                parseSemaphore.release();
+            }
         }
     }
 
@@ -90,23 +114,42 @@ public class ExcelFileServiceImpl implements ExcelFileService {
     public ExcelWorkbookData parseWorkbook(MultipartFile file) {
         validateFile(file);
 
-        try (InputStream inputStream = file.getInputStream();
-             Workbook workbook = WorkbookFactory.create(inputStream)) {
-
-            List<ExcelSheetData> sheetDataList = new ArrayList<>();
-
-            for (int i = 0; i < workbook.getNumberOfSheets(); i++) {
-                Sheet sheet = workbook.getSheetAt(i);
-                sheetDataList.add(parseSheetData(sheet));
+        boolean acquired = false;
+        try {
+            acquired = parseSemaphore.tryAcquire(20, TimeUnit.SECONDS);
+            if (!acquired) {
+                throw new InvalidExcelFileException("Server is currently busy processing other Excel workbooks. Please retry in a few moments.");
             }
+            runPreflight(file);
 
-            return ExcelWorkbookData.builder()
-                    .fileName(file.getOriginalFilename())
-                    .sheets(sheetDataList)
-                    .build();
+            try (InputStream inputStream = file.getInputStream();
+                 Workbook workbook = WorkbookFactory.create(inputStream)) {
 
+                List<ExcelSheetData> sheetDataList = new ArrayList<>();
+                long totalCells = 0;
+
+                for (int i = 0; i < workbook.getNumberOfSheets(); i++) {
+                    Sheet sheet = workbook.getSheetAt(i);
+                    ExcelSheetData parsedSheet = parseSheetData(sheet);
+                    totalCells += (long) (parsedSheet.getRows() != null ? parsedSheet.getRows().size() : 0)
+                            * (parsedSheet.getHeaders() != null ? parsedSheet.getHeaders().size() : 0);
+                    if (totalCells > excelProperties.getMaxCells()) {
+                        throw new InvalidExcelFileException("Workbook is too large (more than "
+                                + excelProperties.getMaxCells() + " cells in total).");
+                    }
+                    sheetDataList.add(parsedSheet);
+                }
+
+                return ExcelWorkbookData.builder()
+                        .fileName(file.getOriginalFilename())
+                        .sheets(sheetDataList)
+                        .build();
+            }
         } catch (InvalidExcelFileException e) {
             throw e;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new InvalidExcelFileException("File processing was interrupted.");
         } catch (IOException e) {
             log.error("Failed to read Excel file: {}", e.getMessage());
             throw new InvalidExcelFileException(
@@ -115,11 +158,19 @@ public class ExcelFileServiceImpl implements ExcelFileService {
             log.error("Unexpected error processing Excel file: {}", e.getMessage());
             throw new InvalidExcelFileException(
                     "The uploaded file could not be processed as a valid Excel workbook.", e);
+        } finally {
+            if (acquired) {
+                parseSemaphore.release();
+            }
         }
     }
 
     private ExcelSheetData parseSheetData(Sheet sheet) {
         List<String> headers = detectHeaders(sheet);
+        if (headers.size() > excelProperties.getMaxColumns()) {
+            throw new InvalidExcelFileException("Sheet '" + sheet.getSheetName() + "' has more than "
+                    + excelProperties.getMaxColumns() + " columns.");
+        }
         List<Map<String, Object>> allRows = readAllDataRows(sheet, headers);
 
         return ExcelSheetData.builder()
@@ -160,6 +211,9 @@ public class ExcelFileServiceImpl implements ExcelFileService {
                 rowMap.put(headers.get(j), getCellValue(cell));
             }
             rows.add(rowMap);
+            if ((long) rows.size() * headers.size() > excelProperties.getMaxCells()) {
+                throw new InvalidExcelFileException("Sheet is too large (more than " + excelProperties.getMaxCells() + " cells).");
+            }
         }
 
         return rows;
@@ -202,6 +256,18 @@ public class ExcelFileServiceImpl implements ExcelFileService {
             }
         } catch (IOException e) {
             throw new InvalidExcelFileException("Failed to verify file integrity.", e);
+        }
+
+    }
+
+    /** Zip-bomb / sheet-count check. Runs INSIDE the parse semaphore so its CPU cost is bounded too. */
+    private void runPreflight(MultipartFile file) {
+        try (InputStream is = file.getInputStream()) {
+            XlsxPreflight.verify(is, excelProperties.getMaxSheets(), excelProperties.getMaxUncompressedBytes());
+        } catch (InvalidExcelFileException e) {
+            throw e;
+        } catch (IOException e) {
+            throw new InvalidExcelFileException("Failed to inspect Excel archive safety limits.", e);
         }
     }
 

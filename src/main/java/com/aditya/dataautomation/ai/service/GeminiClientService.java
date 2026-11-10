@@ -23,6 +23,21 @@ public class GeminiClientService {
     private final RestClient restClient;
     private final ObjectMapper objectMapper;
 
+    /** Opens after 5 failures in a row; callers then use their fallback instantly instead of waiting for the timeout. */
+    private final com.aditya.dataautomation.common.resilience.SimpleCircuitBreaker breaker =
+            new com.aditya.dataautomation.common.resilience.SimpleCircuitBreaker(5, 60_000);
+
+    /** At most 10 Gemini calls at the same time, so a slow Gemini cannot use up all web server threads. */
+    private final java.util.concurrent.Semaphore slots = new java.util.concurrent.Semaphore(10);
+
+    private static boolean isTransient(Exception e) {
+        if (e instanceof org.springframework.web.client.RestClientResponseException r) {
+            int s = r.getStatusCode().value();
+            return s == 429 || s >= 500;
+        }
+        return true; // timeouts, connection refused, I/O errors
+    }
+
     public GeminiClientService(
             GeminiProperties geminiProperties,
             ObjectMapper objectMapper) {
@@ -95,6 +110,10 @@ public class GeminiClientService {
                 )
         );
 
+        if (!breaker.allowRequest() || !slots.tryAcquire()) {
+            return null; // fallback right away
+        }
+
         try {
             String responseStr = restClient.post()
                     .uri(url)
@@ -103,6 +122,8 @@ public class GeminiClientService {
                     .body(requestPayload)
                     .retrieve()
                     .body(String.class);
+
+            breaker.recordSuccess();
 
             if (responseStr == null || responseStr.isBlank()) {
                 return null;
@@ -118,14 +139,22 @@ public class GeminiClientService {
             }
             return null;
         } catch (Exception e) {
+            if (isTransient(e)) {
+                breaker.recordFailure();
+            }
             log.warn("Gemini support chat request failed: {}. Falling back to knowledge base.", e.getMessage());
             return null;
+        } finally {
+            slots.release();
         }
     }
 
     public JsonNode askAnalyst(String userQuestion, DataProfileResponse profile, List<Map<String, Object>> sampleRows) {
         if (!isAvailable()) {
             return null;
+        }
+        if (!breaker.allowRequest() || !slots.tryAcquire()) {
+            return null; // fallback right away
         }
 
         String url = String.format("https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent",
@@ -158,6 +187,8 @@ public class GeminiClientService {
                     .retrieve()
                     .body(String.class);
 
+            breaker.recordSuccess();
+
             if (responseStr == null || responseStr.isBlank()) {
                 return null;
             }
@@ -168,14 +199,25 @@ public class GeminiClientService {
                 JsonNode parts = candidates.get(0).path("content").path("parts");
                 if (parts.isArray() && !parts.isEmpty()) {
                     String textContent = parts.get(0).path("text").asText("");
-                    return objectMapper.readTree(textContent);
+                    JsonNode parsedAnswer = objectMapper.readTree(textContent);
+                    JsonNode usage = rootNode.path("usageMetadata");
+                    if (parsedAnswer instanceof com.fasterxml.jackson.databind.node.ObjectNode on && usage.isObject()) {
+                        on.put("_promptTokens", usage.path("promptTokenCount").asInt(0));
+                        on.put("_completionTokens", usage.path("candidatesTokenCount").asInt(0));
+                    }
+                    return parsedAnswer;
                 }
             }
 
             return null;
         } catch (Exception e) {
+            if (isTransient(e)) {
+                breaker.recordFailure();
+            }
             log.warn("Gemini API request failed or timed out: {}. Using deterministic fallback.", e.getMessage());
             return null;
+        } finally {
+            slots.release();
         }
     }
 

@@ -28,7 +28,10 @@ public class AsyncJobProcessor {
     @Async("jobTaskExecutor")
     public void processExcelUploadAsync(String jobId, Long userId, byte[] bytes, String fileName, String contentType, long fileSize) {
         log.info("Starting background worker for job {}: userId={}, fileName='{}' ({} bytes)", jobId, userId, fileName, fileSize);
-        asyncJobService.startJob(jobId, "Worker thread assigned. Reading file stream...");
+        if (!asyncJobService.startJob(jobId, "Worker thread assigned. Reading file stream...")) {
+            log.info("Job {} is no longer active (cancelled?) - skipping", jobId);
+            return;
+        }
 
         try {
             if (userId == null) {
@@ -40,7 +43,11 @@ public class AsyncJobProcessor {
             asyncJobService.updateProgress(jobId, 30, "Parsing workbook, worksheets and column types...");
             ExcelWorkbookData workbookData = excelFileService.parseWorkbook(file);
 
-            asyncJobService.updateProgress(jobId, 75, "Registering active workspace session and history...");
+            if (!asyncJobService.updateProgress(jobId, 75, "Registering active workspace session and history...")
+                    || asyncJobService.isCancelled(jobId)) {
+                log.info("Job {} was cancelled before registration - discarding parsed workbook", jobId);
+                return;
+            }
             String fileId = workbookSessionHolder.registerNewWorkbook(userId, workbookData, fileName, fileSize, "Async Upload: " + fileName);
 
             int totalRows = 0;
@@ -74,7 +81,13 @@ public class AsyncJobProcessor {
 
         } catch (Exception ex) {
             log.error("Background job {} failed: {}", jobId, ex.getMessage(), ex);
-            asyncJobService.failJob(jobId, ex.getMessage() != null ? ex.getMessage() : "Error processing file in background");
+            boolean userFacing = ex instanceof com.aditya.dataautomation.exception.InvalidRequestException
+                    || ex instanceof IllegalArgumentException;
+            asyncJobService.failJob(jobId, userFacing && ex.getMessage() != null
+                    ? ex.getMessage() : "Error processing file in background");
+        } catch (Error fatal) {
+            asyncJobService.failJob(jobId, "Server ran out of resources while processing this file.");
+            throw fatal;
         }
     }
 }

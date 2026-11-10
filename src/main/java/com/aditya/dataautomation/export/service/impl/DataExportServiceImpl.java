@@ -92,7 +92,8 @@ public class DataExportServiceImpl implements DataExportService {
                 for (int i = 0; i < headers.size(); i++) {
                     if (i > 0) sb.append(',');
                     Object val = row.get(headers.get(i));
-                    sb.append(escapeCsv(val != null ? val.toString() : ""));
+                    // real numbers (e.g. -5) are not formulas; only TEXT cells need the injection guard
+                    sb.append(val instanceof Number ? val.toString() : escapeCsv(val != null ? val.toString() : ""));
                 }
                 sb.append('\n');
             }

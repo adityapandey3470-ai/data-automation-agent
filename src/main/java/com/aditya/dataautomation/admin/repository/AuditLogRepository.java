@@ -15,11 +15,10 @@ public interface AuditLogRepository extends JpaRepository<AuditLog, Long> {
 
     List<AuditLog> findTop200ByOrderByCreatedAtDesc();
 
+    List<AuditLog> findTop200ByActionNotLikeOrderByCreatedAtDesc(String actionPattern);
+
     @Modifying
     @Query("DELETE FROM AuditLog a WHERE a.createdAt < :cutoff")
     int deleteByCreatedAtBefore(@Param("cutoff") LocalDateTime cutoff);
 
-    @Modifying
-    @Query("DELETE FROM AuditLog a")
-    int deleteAllLogs();
 }

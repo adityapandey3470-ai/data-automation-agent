@@ -11,7 +11,7 @@ import org.springframework.context.annotation.Profile;
  * In production (SPRING_PROFILES_ACTIVE=prod), this bean is bypassed and strict Flyway validation is enforced.
  */
 @Configuration
-@Profile("!prod")
+@Profile({"dev", "local"})
 public class FlywayConfig {
 
     @Bean

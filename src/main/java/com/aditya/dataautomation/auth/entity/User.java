@@ -12,6 +12,7 @@ import java.time.LocalDateTime;
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
+@org.hibernate.annotations.DynamicUpdate
 public class User {
 
     @Id

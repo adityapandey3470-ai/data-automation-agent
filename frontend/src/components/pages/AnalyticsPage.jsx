@@ -61,6 +61,14 @@ export default function AnalyticsPage({ sheetName, sheets, onSelectSheet, header
     return 'dashboard';
   });
 
+  const [hasOpenedDashboard, setHasOpenedDashboard] = useState(() => tab === 'dashboard');
+
+  useEffect(() => {
+    if (tab === 'dashboard') {
+      setHasOpenedDashboard(true);
+    }
+  }, [tab]);
+
   useEffect(() => {
     try {
       localStorage.setItem('tabufinery_analytics_tab', tab);
@@ -146,14 +154,16 @@ export default function AnalyticsPage({ sheetName, sheets, onSelectSheet, header
       {tab === 'sort' && <SortTab sheetName={sheetName} headers={headers} />}
       {tab === 'group' && <GroupTab sheetName={sheetName} headers={headers} />}
       {tab === 'duplicates' && <DuplicatesTab sheetName={sheetName} headers={headers} />}
-      {tab === 'dashboard' && (
-        <DashboardTab
-          sheetName={sheetName}
-          headers={headers}
-          sheets={sheets}
-          onSelectSheet={onSelectSheet}
-        />
-      )}
+      <div style={{ display: tab === 'dashboard' ? 'block' : 'none' }}>
+        {hasOpenedDashboard && (
+          <DashboardTab
+            sheetName={sheetName}
+            headers={headers}
+            sheets={sheets}
+            onSelectSheet={onSelectSheet}
+          />
+        )}
+      </div>
     </div>
   );
 }
@@ -1029,17 +1039,20 @@ function DashboardTab({ sheetName, headers, sheets, onSelectSheet }) {
   }, [currentPrefs]);
 
   const dashboardStyleVars = useMemo(() => {
+    const isThemeDark = typeof document !== 'undefined' && document.documentElement.getAttribute('data-theme') === 'dark';
+    const isCustomDark = currentPrefs.style === 'dark' || currentPrefs.style === 'cyberpunk' || currentPrefs.palette === 'midnight_navy';
+
     const vars = {
       '--dash-primary': activePalette.primary,
       '--dash-primary-hover': activePalette.primaryHover || activePalette.primary,
       '--dash-primary-subtle': activePalette.primarySubtle || `${activePalette.primary}18`,
       '--dash-secondary': activePalette.secondary,
-      '--dash-surface': activePalette.surface,
-      '--dash-card-bg': activePalette.cardBg || activePalette.surface,
-      '--dash-border': activePalette.border,
-      '--dash-text-primary': activePalette.textPrimary,
-      '--dash-text-secondary': activePalette.textSecondary,
-      '--dash-text-muted': activePalette.textMuted || '#94a3b8',
+      '--dash-surface': (isThemeDark && !isCustomDark) ? 'var(--surface)' : activePalette.surface,
+      '--dash-card-bg': (isThemeDark && !isCustomDark) ? 'var(--card-bg)' : (activePalette.cardBg || activePalette.surface),
+      '--dash-border': (isThemeDark && !isCustomDark) ? 'var(--border)' : activePalette.border,
+      '--dash-text-primary': (isThemeDark && !isCustomDark) ? 'var(--text-primary)' : activePalette.textPrimary,
+      '--dash-text-secondary': (isThemeDark && !isCustomDark) ? 'var(--text-secondary)' : activePalette.textSecondary,
+      '--dash-text-muted': (isThemeDark && !isCustomDark) ? 'var(--text-tertiary)' : (activePalette.textMuted || '#94a3b8'),
     };
 
     if (currentPrefs.background?.type === 'gradient') {
@@ -1047,8 +1060,10 @@ function DashboardTab({ sheetName, headers, sheets, onSelectSheet }) {
       if (grad) {
         vars['--dash-bg'] = grad.css;
       } else {
-        vars['--dash-bg'] = activePalette.bg;
+        vars['--dash-bg'] = (isThemeDark && !isCustomDark) ? 'transparent' : activePalette.bg;
       }
+    } else if (isThemeDark && !isCustomDark) {
+      vars['--dash-bg'] = 'transparent';
     } else {
       vars['--dash-bg'] = activePalette.bg;
     }
@@ -1106,9 +1121,11 @@ function DashboardTab({ sheetName, headers, sheets, onSelectSheet }) {
         const list = res.data || [];
         const matched = list.find(d => d.sheetName === sheetName);
         if (matched) {
-          setDashboardId(matched.dashboardId);
           const detail = await getDashboard(matched.dashboardId);
-          if (isCurrent) setDashboard(detail.data);
+          if (isCurrent) {
+            setDashboardId(matched.dashboardId);
+            setDashboard(detail.data);
+          }
         } else {
           if (isCurrent) {
             setDashboardId(null);
@@ -1345,7 +1362,18 @@ function DashboardTab({ sheetName, headers, sheets, onSelectSheet }) {
 
   const isChart = ['BAR_CHART', 'LINE_CHART', 'AREA_CHART', 'PIE_CHART', 'DONUT_CHART'].includes(wType);
 
-  if (!dashboardId) {
+  if (loading && !dashboard) {
+    return (
+      <div className="card p-24 text-center" style={{ minHeight: 280, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
+          <div className="spinner" style={{ width: 28, height: 28, borderWidth: 3 }} />
+          <span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>Loading dashboard...</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (!dashboardId || !dashboard) {
     return (
       <div className="card p-24 text-center">
         <div className="empty-state" style={{ maxWidth: 620, margin: '0 auto' }}>
@@ -1502,7 +1530,7 @@ function DashboardTab({ sheetName, headers, sheets, onSelectSheet }) {
       </div>
 
       {filterDimensions.length > 0 && (
-        <div className="dashboard-toolbar" style={{ background: 'var(--surface-secondary)', borderStyle: 'dashed' }}>
+        <div className="dashboard-toolbar" style={{ background: 'var(--surface-secondary)', borderStyle: 'solid' }}>
           <div className="dashboard-slicer">
             <span className="slicer-label">
               <Filter size={13} className="text-emerald" /> Interactive Slicer:
@@ -1803,7 +1831,9 @@ function DashboardTab({ sheetName, headers, sheets, onSelectSheet }) {
           });
         };
 
+        const isThemeDark = typeof document !== 'undefined' && document.documentElement.getAttribute('data-theme') === 'dark';
         const isDark = Boolean(
+          isThemeDark ||
           currentPrefs.style === 'dark' ||
           currentPrefs.style === 'cyberpunk' ||
           currentPrefs.palette === 'midnight_navy' ||
@@ -1812,24 +1842,58 @@ function DashboardTab({ sheetName, headers, sheets, onSelectSheet }) {
           (activePalette?.cardBg && (activePalette.cardBg.startsWith('#0') || activePalette.cardBg.startsWith('#1')))
         );
 
+        const hasNoWidgets = kpis.length === 0 && visuals.length === 0;
+
         return (
           <>
-            <div
-              id="dashboard-canvas-area"
-              className="dashboard-canvas-wrapper chart-dashboard-customized"
-              style={dashboardStyleVars}
-              data-dash-style={currentPrefs.style || 'modern'}
-              data-dash-card-style={currentPrefs.card?.style || 'bordered'}
-              data-dash-card-radius={currentPrefs.card?.radius || 'medium'}
-              data-dash-card-shadow={currentPrefs.card?.shadow || 'subtle'}
-              data-dash-density={currentPrefs.layout?.density || 'comfortable'}
-              data-dash-typography={currentPrefs.typography?.size || 'medium'}
-              data-dash-emphasis={currentPrefs.typography?.emphasis || 'standard'}
-              data-dash-motion={currentPrefs.typography?.reducedMotion ? 'reduced' : 'normal'}
-              data-dash-dark={isDark ? 'true' : 'false'}
-            >
-              {renderDashboardWidgets(false)}
-            </div>
+            {hasNoWidgets ? (
+              <div className="card text-center">
+                <div className="empty-state">
+                  <div className="empty-icon-wrap">
+                    <BarChart3 size={28} className="text-emerald" />
+                  </div>
+                  <h4 className="empty-title">Dashboard Empty</h4>
+                  <p className="empty-desc">No widgets currently configured on this board.</p>
+                  <button
+                    className="btn btn-primary mt-16"
+                    onClick={handleAutoGenerate}
+                    disabled={loading}
+                    style={{
+                      background: 'var(--emerald, #059669)',
+                      borderColor: 'var(--emerald, #059669)',
+                      color: '#ffffff',
+                      fontWeight: 600,
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '6px'
+                    }}
+                  >
+                    {loading ? (
+                      <><div className="spinner" style={{ width: 14, height: 14, borderWidth: 2 }} /> Building Widgets...</>
+                    ) : (
+                      <><Sparkles size={14} /> Auto-Generate Widgets</>
+                    )}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div
+                id="dashboard-canvas-area"
+                className="dashboard-canvas-wrapper chart-dashboard-customized"
+                style={dashboardStyleVars}
+                data-dash-style={currentPrefs.style || 'modern'}
+                data-dash-card-style={currentPrefs.card?.style || 'bordered'}
+                data-dash-card-radius={currentPrefs.card?.radius || 'medium'}
+                data-dash-card-shadow={currentPrefs.card?.shadow || 'subtle'}
+                data-dash-density={currentPrefs.layout?.density || 'comfortable'}
+                data-dash-typography={currentPrefs.typography?.size || 'medium'}
+                data-dash-emphasis={currentPrefs.typography?.emphasis || 'standard'}
+                data-dash-motion={currentPrefs.typography?.reducedMotion ? 'reduced' : 'normal'}
+                data-dash-dark={isDark ? 'true' : 'false'}
+              >
+                {renderDashboardWidgets(false)}
+              </div>
+            )}
 
             <DashboardCustomizerModal
               isOpen={showCustomizer}

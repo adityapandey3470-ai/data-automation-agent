@@ -6,11 +6,17 @@ import com.aditya.dataautomation.auth.dto.SignupRequest;
 import com.aditya.dataautomation.auth.dto.UserDto;
 import com.aditya.dataautomation.auth.security.UserPrincipal;
 import com.aditya.dataautomation.auth.service.AuthService;
+import com.aditya.dataautomation.auth.service.RefreshTokenService;
+import com.aditya.dataautomation.exception.InvalidRequestException;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseCookie;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
@@ -22,19 +28,76 @@ import org.springframework.web.bind.annotation.*;
 public class AuthController {
 
     private final AuthService authService;
+    private final RefreshTokenService refreshTokenService;
+
+    @Value("${app.auth.cookie-secure:false}")
+    private boolean cookieSecure;
+
+    @Value("${app.auth.cookie-same-site:Strict}")
+    private String cookieSameSite;
+
+    private ResponseCookie refreshCookie(String value, long maxAgeSeconds) {
+        return ResponseCookie.from(RefreshTokenService.COOKIE_NAME, value != null ? value : "")
+                .httpOnly(true)
+                .secure(cookieSecure)
+                .sameSite(cookieSameSite)
+                .path("/api/v1/auth")
+                .maxAge(maxAgeSeconds)
+                .build();
+    }
+
+    private String resolveClientIp(HttpServletRequest request) {
+        Object attr = request.getAttribute("clientIp");
+        if (attr instanceof String s && !s.isBlank()) {
+            return s;
+        }
+        return request.getRemoteAddr() != null ? request.getRemoteAddr() : "127.0.0.1";
+    }
 
     @PostMapping("/signup")
     @Operation(summary = "Register a new user account")
     public ResponseEntity<AuthResponse> signup(@Valid @RequestBody SignupRequest request) {
-        AuthResponse response = authService.signup(request);
-        return ResponseEntity.status(HttpStatus.CREATED).body(response);
+        try {
+            AuthResponse response = authService.signup(request);
+            return ResponseEntity.status(HttpStatus.CREATED).body(response);
+        } catch (org.springframework.dao.DataIntegrityViolationException e) {
+            // concurrent signup with the same email: answer exactly like the "already registered" path
+            return ResponseEntity.status(HttpStatus.CREATED).body(authService.genericSignupResponse(request.getEmail()));
+        }
     }
 
     @PostMapping("/login")
     @Operation(summary = "Authenticate an existing user")
-    public ResponseEntity<AuthResponse> login(@Valid @RequestBody LoginRequest request) {
-        AuthResponse response = authService.login(request);
+    public ResponseEntity<AuthResponse> login(
+            @Valid @RequestBody LoginRequest request,
+            HttpServletRequest httpRequest) {
+        String clientIp = resolveClientIp(httpRequest);
+        AuthResponse response = authService.login(request, clientIp);
+        if (response.getUser() != null) {
+            RefreshTokenService.Issued issued = refreshTokenService.issueForUser(response.getUser().getId());
+            ResponseCookie cookie = refreshCookie(issued.rawToken(), issued.maxAgeSeconds());
+            return ResponseEntity.ok()
+                    .header(HttpHeaders.SET_COOKIE, cookie.toString())
+                    .body(response);
+        }
         return ResponseEntity.ok(response);
+    }
+
+    @PostMapping("/refresh")
+    @Operation(summary = "Rotate refresh token and issue new access token")
+    public ResponseEntity<AuthResponse> refresh(
+            @CookieValue(value = RefreshTokenService.COOKIE_NAME, required = false) String rawRefreshToken) {
+        if (rawRefreshToken == null || rawRefreshToken.isBlank()) {
+            throw new com.aditya.dataautomation.exception.AuthenticationFailedException("Refresh token is missing");
+        }
+        RefreshTokenService.Rotation rotation = refreshTokenService.rotate(rawRefreshToken);
+        AuthResponse response = authService.buildSessionResponse(rotation.user());
+        ResponseEntity.BodyBuilder builder = ResponseEntity.ok();
+        if (rotation.newRawToken() != null) {
+            builder.header(HttpHeaders.SET_COOKIE,
+                    refreshCookie(rotation.newRawToken(), rotation.maxAgeSeconds()).toString());
+        }
+        return builder.body(response);
     }
 
     @PostMapping("/forgot-password")
@@ -61,13 +124,6 @@ public class AuthController {
     public ResponseEntity<AuthResponse> verifyEmail(
             @Valid @RequestBody com.aditya.dataautomation.auth.dto.VerifyEmailRequest request) {
         AuthResponse response = authService.verifyEmail(request.getToken());
-        return ResponseEntity.ok(response);
-    }
-
-    @GetMapping("/verify-email")
-    @Operation(summary = "Verify user email address via link parameter")
-    public ResponseEntity<AuthResponse> verifyEmailByParam(@RequestParam("token") String token) {
-        AuthResponse response = authService.verifyEmail(token);
         return ResponseEntity.ok(response);
     }
 
@@ -101,11 +157,17 @@ public class AuthController {
 
     @PostMapping("/logout")
     @Operation(summary = "Logout and invalidate current session token")
-    public ResponseEntity<java.util.Map<String, Object>> logout(@RequestHeader(value = "Authorization", required = false) String authHeader) {
+    public ResponseEntity<java.util.Map<String, Object>> logout(
+            @RequestHeader(value = "Authorization", required = false) String authHeader,
+            @CookieValue(value = RefreshTokenService.COOKIE_NAME, required = false) String rawRefreshToken) {
         authService.logout(authHeader);
-        return ResponseEntity.ok(java.util.Map.of(
-                "success", true,
-                "message", "Logged out successfully"
-        ));
+        refreshTokenService.revokeByRawToken(rawRefreshToken);
+        ResponseCookie cookie = refreshCookie("", 0);
+        return ResponseEntity.ok()
+                .header(HttpHeaders.SET_COOKIE, cookie.toString())
+                .body(java.util.Map.of(
+                        "success", true,
+                        "message", "Logged out successfully"
+                ));
     }
 }

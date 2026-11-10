@@ -19,6 +19,9 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestPart;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
+import com.aditya.dataautomation.auth.security.UserPrincipal;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.web.bind.annotation.RequestHeader;
 
 @RestController
 @RequestMapping("/api/v1/files")
@@ -28,6 +31,7 @@ public class ExcelFileController {
 
     private final ExcelFileService excelFileService;
     private final WorkbookSessionHolder workbookSessionHolder;
+    private final com.aditya.dataautomation.idempotency.IdempotencyService idempotencyService;
 
     @PostMapping(value = "/excel", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     @Operation(
@@ -42,32 +46,46 @@ public class ExcelFileController {
             @ApiResponse(responseCode = "400", description = "Invalid or missing file"),
             @ApiResponse(responseCode = "413", description = "File exceeds size limit")
     })
-    public ResponseEntity<ExcelFileResponse> uploadExcelFile(
+    public ResponseEntity<?> uploadExcelFile(
             @Parameter(description = "The .xlsx file to upload", required = true)
-            @RequestPart("file") MultipartFile file) {
+            @RequestPart("file") MultipartFile file,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
+            @AuthenticationPrincipal UserPrincipal principal) {
 
-        ExcelFileResponse parsedResponse = excelFileService.processExcelFile(file);
-        ExcelWorkbookData workbookData = excelFileService.parseWorkbook(file);
-        String fileName = file.getOriginalFilename() != null ? file.getOriginalFilename() : "Workbook";
+        Long userId = principal != null ? principal.getId() : null;
+        Object response = idempotencyService.execute(userId, "excel-upload", idempotencyKey, () -> {
+            // parse ONCE (previously the file was validated + parsed twice)
+            ExcelWorkbookData workbookData = excelFileService.parseWorkbook(file);
+            String fileName = file.getOriginalFilename() != null ? file.getOriginalFilename() : "Workbook";
 
-        String fileId = workbookSessionHolder.registerNewWorkbook(workbookData, fileName, file.getSize(), "Upload: " + fileName);
+            String fileId = workbookSessionHolder.registerNewWorkbook(workbookData, fileName, file.getSize(), "Upload: " + fileName);
 
-        int totalRows = 0;
-        if (parsedResponse.getSheets() != null) {
-            for (var s : parsedResponse.getSheets()) {
-                totalRows += s.getRowCount();
+            int totalRows = 0;
+            java.util.List<com.aditya.dataautomation.excel.dto.ExcelSheetResponse> sheets = new java.util.ArrayList<>();
+            if (workbookData.getSheets() != null) {
+                for (com.aditya.dataautomation.excel.model.ExcelSheetData sheet : workbookData.getSheets()) {
+                    totalRows += sheet.getRowCount();
+                    sheets.add(com.aditya.dataautomation.excel.dto.ExcelSheetResponse.builder()
+                            .sheetName(sheet.getSheetName())
+                            .rowCount(sheet.getRowCount())
+                            .columnCount(sheet.getColumnCount())
+                            .headers(sheet.getHeaders() != null ? sheet.getHeaders() : java.util.Collections.emptyList())
+                            .previewRows(sheet.getRows() != null ? sheet.getRows().stream().limit(10).toList() : java.util.Collections.emptyList())
+                            .build());
+                }
             }
-        }
 
-        ExcelFileResponse response = ExcelFileResponse.builder()
-                .fileId(fileId)
-                .fileName(fileName)
-                .fileSize(file.getSize())
-                .contentType(parsedResponse.getContentType())
-                .sheetCount(parsedResponse.getSheetCount())
-                .totalRows(totalRows)
-                .sheets(parsedResponse.getSheets())
-                .build();
+            return ExcelFileResponse.builder()
+                    .fileId(fileId)
+                    .fileName(fileName)
+                    .fileSize(file.getSize())
+                    .contentType(file.getContentType() != null ? file.getContentType()
+                            : "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+                    .sheetCount(sheets.size())
+                    .totalRows(totalRows)
+                    .sheets(sheets)
+                    .build();
+        });
 
         return ResponseEntity.ok(response);
     }

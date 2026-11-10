@@ -27,6 +27,7 @@ public class SupportController {
 
     private final SupportChatService chatService;
     private final SupportTicketService ticketService;
+    private final com.aditya.dataautomation.idempotency.IdempotencyService idempotencyService;
 
     @PostMapping("/chat")
     @Operation(summary = "Chat with AI Support Bot", description = "Answers support inquiries about Tabufinery features, workflows, and troubleshooting")
@@ -40,11 +41,13 @@ public class SupportController {
 
     @PostMapping("/ticket")
     @Operation(summary = "Submit a support escalation ticket", description = "Submits an official support ticket tied to the user account")
-    public ResponseEntity<TicketResponse> createTicket(
+    public ResponseEntity<?> createTicket(
             @Valid @RequestBody CreateTicketRequest request,
+            @org.springframework.web.bind.annotation.RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
             @AuthenticationPrincipal UserPrincipal principal) {
 
-        TicketResponse response = ticketService.createTicket(request, principal);
+        Object response = idempotencyService.execute(principal != null ? principal.getId() : null, "support-ticket", idempotencyKey,
+                () -> ticketService.createTicket(request, principal));
         return ResponseEntity.ok(response);
     }
 

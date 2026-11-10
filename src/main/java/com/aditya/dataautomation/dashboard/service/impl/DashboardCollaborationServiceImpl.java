@@ -23,11 +23,14 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.stream.Collectors;
+import java.util.Objects;
 
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class DashboardCollaborationServiceImpl implements DashboardCollaborationService {
+
+    private static final int MAX_SHARES_PER_DASHBOARD = 50;
 
     private final DashboardCollaboratorRepository collaboratorRepository;
     private final DashboardRepository dashboardRepository;
@@ -43,46 +46,64 @@ public class DashboardCollaborationServiceImpl implements DashboardCollaboration
             throw new InvalidRequestException("You cannot share a dashboard with yourself");
         }
 
-        List<DashboardCollaboratorEntity> existingShares = collaboratorRepository.findByDashboardIdOrderByCreatedAtDesc(request.getDashboardId());
-        if (!existingShares.isEmpty()) {
-            boolean isOwner = existingShares.stream().anyMatch(e -> e.getOwnerId().equals(currentUserId));
-            boolean canInvite = existingShares.stream().anyMatch(e ->
-                    ((e.getSharedWithUserId() != null && e.getSharedWithUserId().equals(currentUserId))
-                            || e.getSharedWithEmail().equalsIgnoreCase(currentUserEmail)) && e.isCanInvite());
+        // The owner is ALWAYS the user who owns the dashboard row - never inferred from collaborator rows.
+        var dashboard = dashboardRepository.findByDashboardId(request.getDashboardId())
+                .orElseThrow(() -> new AccessDeniedException("Dashboard not found or access denied"));
+        Long realOwnerId = dashboard.getUserId();
+        boolean isOwner = realOwnerId != null && realOwnerId.equals(currentUserId);
 
-            if (!isOwner && !canInvite) {
-                throw new AccessDeniedException("You do not have permission to invite others to this dashboard");
-            }
-        } else {
-            var d = dashboardRepository.findByDashboardId(request.getDashboardId())
-                    .orElseThrow(() -> new AccessDeniedException("Dashboard not found or access denied"));
-            if (d.getUserId() == null || !d.getUserId().equals(currentUserId)) {
-                throw new AccessDeniedException("You do not have permission to share this dashboard");
-            }
+        List<DashboardCollaboratorEntity> existingShares = collaboratorRepository.findByDashboardIdOrderByCreatedAtDesc(request.getDashboardId());
+        DashboardCollaboratorEntity myShare = existingShares.stream()
+                .filter(e -> (e.getSharedWithUserId() != null && e.getSharedWithUserId().equals(currentUserId))
+                        || (currentUserEmail != null && e.getSharedWithEmail().equalsIgnoreCase(currentUserEmail)))
+                .findFirst()
+                .orElse(null);
+
+        if (!isOwner && (myShare == null || !myShare.isCanInvite())) {
+            throw new AccessDeniedException("You do not have permission to invite others to this dashboard");
+        }
+
+        // a delegate can never hand out more rights than they hold themselves
+        boolean grantCustomize = request.isCanCustomize();
+        boolean grantInvite = request.isCanInvite();
+        if (!isOwner) {
+            grantCustomize = grantCustomize && myShare.isCanCustomize();
+            grantInvite = grantInvite && myShare.isCanInvite();
+        }
+
+        Optional<User> targetUser = userRepository.findByEmailIgnoreCase(targetEmail);
+        if (targetUser.isPresent() && Objects.equals(targetUser.get().getId(), realOwnerId)) {
+            throw new InvalidRequestException("The dashboard owner already has full access");
         }
 
         Optional<DashboardCollaboratorEntity> existing = collaboratorRepository.findByDashboardIdAndSharedWithEmailIgnoreCase(request.getDashboardId(), targetEmail);
         DashboardCollaboratorEntity entity;
         if (existing.isPresent()) {
+            if (!isOwner) {
+                throw new AccessDeniedException("Only the dashboard owner can change an existing share");
+            }
             entity = existing.get();
-            entity.setCanCustomize(request.isCanCustomize());
-            entity.setCanInvite(request.isCanInvite());
-            entity.setDashboardName(request.getDashboardName());
+            entity.setCanCustomize(grantCustomize);
+            entity.setCanInvite(grantInvite);
         } else {
-            Optional<User> targetUser = userRepository.findByEmailIgnoreCase(targetEmail);
+            if (existingShares.size() >= MAX_SHARES_PER_DASHBOARD) {
+                throw new InvalidRequestException("This dashboard has reached the maximum of " + MAX_SHARES_PER_DASHBOARD + " collaborators");
+            }
             Long targetUserId = targetUser.map(User::getId).orElse(null);
             String status = targetUser.isPresent() ? "ACCEPTED" : "PENDING_REGISTRATION";
+            String ownerEmail = userRepository.findById(realOwnerId).map(User::getEmail).orElse("unknown");
 
             entity = DashboardCollaboratorEntity.builder()
                     .id(UUID.randomUUID().toString())
                     .dashboardId(request.getDashboardId())
-                    .ownerId(currentUserId)
-                    .ownerEmail(currentUserEmail != null ? currentUserEmail : "unknown")
+                    .ownerId(realOwnerId)
+                    .ownerEmail(ownerEmail)
                     .sharedWithEmail(targetEmail)
                     .sharedWithUserId(targetUserId)
-                    .dashboardName(request.getDashboardName())
-                    .canCustomize(request.isCanCustomize())
-                    .canInvite(request.isCanInvite())
+                    // trusted name from the database, not from the request (prevents spoofed names in invitations)
+                    .dashboardName(dashboard.getName())
+                    .canCustomize(grantCustomize)
+                    .canInvite(grantInvite)
                     .invitationStatus(status)
                     .build();
         }
@@ -96,8 +117,8 @@ public class DashboardCollaborationServiceImpl implements DashboardCollaboration
                 .adminEmail(currentUserEmail != null ? currentUserEmail : "system")
                 .action("DASHBOARD_SHARE_INVITE")
                 .targetResource("dashboard:" + request.getDashboardId())
-                .details("Shared dashboard '" + request.getDashboardName() + "' with " + targetEmail
-                        + " [canCustomize=" + request.isCanCustomize() + ", canInvite=" + request.isCanInvite()
+                .details("Shared dashboard '" + dashboard.getName() + "' with " + targetEmail
+                        + " [canCustomize=" + entity.isCanCustomize() + ", canInvite=" + entity.isCanInvite()
                         + ", status=" + entity.getInvitationStatus() + "]")
                 .build());
 
@@ -162,13 +183,11 @@ public class DashboardCollaborationServiceImpl implements DashboardCollaboration
         DashboardCollaboratorEntity entity = collaboratorRepository.findById(shareId)
                 .orElseThrow(() -> new InvalidRequestException("Collaborator record not found"));
 
-        if (!entity.getOwnerId().equals(currentUserId)) {
-            boolean canManage = collaboratorRepository.findByDashboardIdOrderByCreatedAtDesc(entity.getDashboardId()).stream()
-                    .anyMatch(c -> ((c.getSharedWithUserId() != null && c.getSharedWithUserId().equals(currentUserId))
-                            || c.getSharedWithEmail().equalsIgnoreCase(currentUserEmail)) && c.isCanInvite());
-            if (!canManage) {
-                throw new AccessDeniedException("Only the owner or authorized delegators can update permissions");
-            }
+        Long realOwnerId = dashboardRepository.findByDashboardId(entity.getDashboardId())
+                .map(d -> d.getUserId())
+                .orElse(null);
+        if (realOwnerId == null || !realOwnerId.equals(currentUserId)) {
+            throw new AccessDeniedException("Only the dashboard owner can update permissions");
         }
 
         entity.setCanCustomize(request.isCanCustomize());
@@ -194,7 +213,10 @@ public class DashboardCollaborationServiceImpl implements DashboardCollaboration
         DashboardCollaboratorEntity entity = collaboratorRepository.findById(shareId)
                 .orElseThrow(() -> new InvalidRequestException("Collaborator record not found"));
 
-        boolean isOwner = entity.getOwnerId().equals(currentUserId);
+        Long realOwnerId = dashboardRepository.findByDashboardId(entity.getDashboardId())
+                .map(d -> d.getUserId())
+                .orElse(null);
+        boolean isOwner = realOwnerId != null && realOwnerId.equals(currentUserId);
         boolean isSelf = (entity.getSharedWithUserId() != null && entity.getSharedWithUserId().equals(currentUserId))
                 || entity.getSharedWithEmail().equalsIgnoreCase(currentUserEmail);
 
@@ -223,7 +245,10 @@ public class DashboardCollaborationServiceImpl implements DashboardCollaboration
             return;
         }
 
-        boolean isOwner = records.stream().anyMatch(r -> r.getOwnerId().equals(currentUserId));
+        Long realOwnerId = dashboardRepository.findByDashboardId(dashboardId)
+                .map(d -> d.getUserId())
+                .orElse(null);
+        boolean isOwner = realOwnerId != null && realOwnerId.equals(currentUserId);
         if (isOwner) {
             return;
         }

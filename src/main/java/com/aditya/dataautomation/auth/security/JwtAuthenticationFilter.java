@@ -33,11 +33,20 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         try {
             String token = extractJwtFromRequest(request);
 
-            if (StringUtils.hasText(token) && jwtService.validateToken(token)) {
-                Long userId = jwtService.extractUserId(token);
+            java.util.Map<?, ?> claims = StringUtils.hasText(token) ? jwtService.extractAllClaimsIfValid(token) : null;
+            if (claims != null) {
+                Long userId = null;
+                Long issuedAt = null;
+                try {
+                    Object sub = claims.get("sub");
+                    userId = sub != null ? Long.parseLong(String.valueOf(sub)) : null;
+                    Object iat = claims.get("iat");
+                    issuedAt = iat instanceof Number n ? n.longValue() : null;
+                } catch (NumberFormatException ignored) {
+                    // malformed subject -> treated as unauthenticated
+                }
                 if (userId != null && SecurityContextHolder.getContext().getAuthentication() == null) {
                     User user = userRepository.findById(userId).orElse(null);
-                    Long issuedAt = jwtService.extractIssuedAt(token);
                     long validAfter = (user != null && user.getTokensValidAfter() != null) ? user.getTokensValidAfter() : 0L;
                     if (user != null && user.isEnabled() && issuedAt != null && issuedAt > validAfter) {
                         UserPrincipal principal = UserPrincipal.create(user);
